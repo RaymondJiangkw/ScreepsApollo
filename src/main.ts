@@ -1,12 +1,8 @@
+import { Apollo as A } from './framework/apollo'
 import { errorMapper } from './modules/errorMapper'
+import { mountAll } from './mount'
 
-/**
- * 接受两个数字并相加
- */
-export const testFn = function (num1: number, num2: number): number {
-    return num1 + num2
-}
+/** 重启时重新挂载 */
+mountAll()
 
-export const loop = errorMapper(() => {
-    console.log("Hello World");
-})
+export const loop = errorMapper(A.proc.tick)
