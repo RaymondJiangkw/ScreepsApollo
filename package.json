@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "push": "rollup -cw --environment DEST:pserver",
+    "push-unofficial": "rollup -cw --environment DEST:test", 
     "build": "rollup -cw",
     "test-unit": "jest test/unit",
     "test-cover": "jest --coverage",

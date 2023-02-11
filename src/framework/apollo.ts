@@ -1,4 +1,4 @@
-import { assertWithMsg, generate_random_hex, log, LOG_ERR } from "@/utils"
+import { assertWithMsg, generate_random_hex, log, LOG_ERR, LOG_INFO, LOG_PROFILE } from "@/utils"
 
 // -------------------------------------------------------------
 
@@ -135,6 +135,8 @@ class Process {
     tagDict: {[tag: string]: number}
     /** 进程状态 */
     state: typeof PROCESS_STATE_READY | typeof PROCESS_STATE_STUCK | typeof PROCESS_STATE_RUNNING
+    /** 记录进程的时间花销 */
+    #cpuCost: number
 
     constructor(
         pid: ProcId, 
@@ -145,6 +147,8 @@ class Process {
         this.description = description
         this.descriptor = descriptor
 
+        // 初始化 Cost
+        this.#cpuCost = null
         // 初始化当前 PC
         this.pc = 0
         // 计算 Tag 到对应原子函数行数的映射
@@ -166,6 +170,14 @@ class Process {
     
     toString() {
         return `[Proc ${this.pid} (${this.state}): ${this.description}]`
+    }
+
+    updateCpuCost(cpuCost: number) {
+        this.#cpuCost = cpuCost
+    }
+
+    getCpuCost() {
+        return this.#cpuCost
     }
 }
 
@@ -217,7 +229,7 @@ class ProcessModule {
     /** 获得下一个进程 Id */
     #getProcId(): ProcId {
         // 无可用的进程 Id
-        assertWithMsg( this.#idLinkList.length === 0, `无可用进程 Id` )
+        assertWithMsg( this.#idLinkList.length !== 0, `无可用进程 Id` )
         // 返回进程 Id 链表中第一个可用 Id
         return this.#idLinkList.shift()
     }
@@ -343,6 +355,7 @@ class ProcessModule {
      * 的进程也会被执行.
      */
     tick(): void {
+        log(LOG_INFO, `开始运行进程, 进程池当前大小为 ${this.#processIdReadyQueue.length} ...`)
         // 检验为本 tick 第一次调用
         assertWithMsg(this.#lastTick === -1 || this.#lastTick !== Game.time, `进程模块在 ${Game.time} 被重复调用 tick 函数`)
         // 校验当前没有正在运行的进程
@@ -355,9 +368,13 @@ class ProcessModule {
             const id = this.#processIdReadyQueue.shift()
             const proc = this.#procDict[id]
 
+            log(LOG_INFO, `运行🔄 进程 [${proc.description}] ...`)
+
             // 修改状态
             this.#currentProcId = id
             proc.state = PROCESS_STATE_RUNNING
+
+            const startCpuTime = Game.cpu.getUsed()
 
             // 运行进程
             // 这个不作为 Process 的成员函数存在, 
@@ -439,8 +456,10 @@ class ProcessModule {
                     }
                 }
             }
-        }
 
+            proc.updateCpuCost(Game.cpu.getUsed() - startCpuTime)
+            log(LOG_PROFILE, `🔄 进程 [${proc.description}] 消耗 ${proc.getCpuCost().toFixed(2)}`)
+        }
         // 将进程模块的就绪进程 Id 队列指向临时变量
         this.#processIdReadyQueue = processIdReadyQueue
         // 更新上一次调用函数的时间
@@ -477,7 +496,7 @@ class ProcessModule {
         const lock = this.#lockDict[lockId]
         const pid = this.#currentProcId
         // 正在运行的进程不存在
-        assertWithMsg( pid !== -1, `在获得锁 ${lockId} 时, 无法找到正在运行的进程` )
+        assertWithMsg( pid !== -1, `在获得锁 ${lockId} 时, 无法找到正在运行的进程以确认想要获得锁的进程` )
 
         // 如果正有进程持有锁
         if (lock.holder !== null) {
@@ -499,7 +518,7 @@ class ProcessModule {
         const lock = this.#lockDict[lockId]
         const pid = this.#currentProcId
         // 正在运行的进程不存在
-        assertWithMsg( pid !== -1, `在释放锁 ${lockId} 时, 无法找到正在运行的进程` )
+        assertWithMsg( pid !== -1, `在释放锁 ${lockId} 时, 无法找到正在运行的进程以确认想要释放锁的进程` )
         
         // 释放的进程不持有锁
         assertWithMsg( lock.holder === pid, `进程 ${this.#procDict[pid]} 不持有锁 ${lockId}, 但是却期望释放` )
@@ -539,15 +558,17 @@ class ProcessModule {
 
     #signalSwait(...signals: {signalId: string, lowerbound: number, request: number}[]): StuckableAtomicFuncReturnCode {
         const pid = this.#currentProcId
-        // 正在运行的进程不存在
-        assertWithMsg( pid !== -1, `在获得信号集 ${signals.map(o => o.signalId)} 时, 无法找到正在运行的进程` )
         
         for (const signalDescriptor of signals) {
             const signal = this.#signalDict[signalDescriptor.signalId]
             // 找不到信号量 (可能已经销毁)
             if (!signal) continue
             if (signal.value < signalDescriptor.lowerbound) {
+                // 正在运行的进程不存在
+                assertWithMsg( pid !== -1, `在获得信号集 ${signals.map(o => o.signalId)} 时, 无法找到正在运行的进程以确认想要获得信号集的进程` )
+
                 assertWithMsg(!signal.stuckList.map(arr => arr[0]).includes(pid), `信号量 ${signal.signalId} 的阻塞列表中包含 ${this.#procDict[pid]}, 该进程却又想获得信号量`)
+                
                 signal.stuckList.push([pid, signalDescriptor.lowerbound])
                 return this.#STOP_STUCK
             }
@@ -563,9 +584,10 @@ class ProcessModule {
     }
 
     #signalSsignal(...signals: {signalId: string, request: number}[]): StuckableAtomicFuncReturnCode {
-        const pid = this.#currentProcId
+        // 在激活信号集时, 其实并不需要确定触发的进程 Id
+        // const pid = this.#currentProcId
         // 正在运行的进程不存在
-        assertWithMsg( pid !== -1, `在激活信号集 ${signals.map(o => o.signalId)} 时, 无法找到正在运行的进程` )
+        // assertWithMsg( pid !== -1, `在激活信号集 ${signals.map(o => o.signalId)} 时, 无法找到正在运行的进程` )
         
         for (const signalDescriptor of signals) {
             const signal = this.#signalDict[signalDescriptor.signalId]
@@ -781,17 +803,19 @@ class ResourceModule {
 class Timer {
     /** 记录上一次调用 tick 的 Game.time 以保证每 tick 只能执行一次 tick */
     #lastTick: number = -1
-    #tasks: {[tick: number]: {func: (...args) => any, params: any[]}[]} = {}
+    #tasks: {[tick: number]: {func: (...args) => any, params: any[], description: string, cpuCost: number, period?: number}[]} = {}
+    /** 周期任务停止时的返回值 */
+    STOP: string = 'STOP'
     /**
      * 添加定时任务
      */
-    add(tick: number, func: (...args) => any, params: any[]) {
+    add(tick: number, func: (...args) => any, params: any[], description: string, period?: number) {
         assertWithMsg(tick > Game.time, `无法添加发生在当前 tick 或之前的定时任务`)
-
+        
         if ( !(tick in this.#tasks) )
             this.#tasks[tick] = []
         
-        this.#tasks[tick].push({ func, params })
+        this.#tasks[tick].push({ func, params, description, cpuCost: null, period })
     }
     /**
      * 在当前 tick 运行一次
@@ -802,9 +826,18 @@ class Timer {
         // 检验为本 tick 第一次调用
         assertWithMsg(this.#lastTick === -1 || this.#lastTick !== Game.time, `定时器在 ${Game.time} 被重复调用 tick 函数`)
 
-        if ( !(Game.time in this.#tasks) ) return
-        for ( const { func, params } of this.#tasks[Game.time] )
-            func.apply(undefined, params)
+        if ( !(Game.time in this.#tasks) ) return OK_STOP_CURRENT
+        log(LOG_INFO, `⏲️ 定时器内函数数量为 ${this.#tasks[Game.time].length} ...`)
+        for ( const task of this.#tasks[Game.time] ) {
+            const { func, params, description, period } = task
+            const startCpuTime = Game.cpu.getUsed()
+            const ret = func.apply(undefined, params)
+            task.cpuCost = Game.cpu.getUsed() - startCpuTime
+            log(LOG_PROFILE, `⏲️ 定时器内任务 [${description}] 消耗 ${task.cpuCost.toFixed(2)}`)
+            // 周期任务 (再次加入到定时器队列)
+            if ( ret !== this.STOP && typeof period === "number" && period > 0 )
+                this.add(Game.time + period, func, params, description, period)
+        }
         delete this.#tasks[Game.time]
 
         this.#lastTick = Game.time
@@ -837,7 +870,7 @@ class ApolloKernel {
         this.timer = new Timer()
 
         // 第一进程: 定时器 (在每 tick 一开始第一个执行)
-        this.proc.createProc([ this.timer.tick ], `⏲️ 定时器`)
+        this.proc.createProc([ () => this.timer.tick() ], `⏲️ 定时器`)
     }
 }
 
