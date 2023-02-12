@@ -130,7 +130,12 @@ function issueHarvestProc(roomName: string) {
 
         const spawns = Game.rooms[roomName].find<FIND_STRUCTURES, StructureSpawn>(FIND_STRUCTURES, { filter: { structureType: STRUCTURE_SPAWN } }).filter(s => s.store.getFreeCapacity(RESOURCE_ENERGY) > 0)
 
-        if ( spawns.length === 0 ) return A.proc.OK_STOP_CURRENT
+        if ( spawns.length === 0 ) {
+            /** 此时, 本进程无用, 释放资源并休眠 */
+            C.release(name)
+            workerName = null
+            return A.proc.STOP_SLEEP
+        }
         const spawn = _.min(spawns, s => creep.pos.getRangeTo(s))
 
         /** 已经接近 Spawn */
@@ -143,12 +148,14 @@ function issueHarvestProc(roomName: string) {
         return A.proc.OK_STOP_CURRENT
     }
 
-    return A.proc.createProc([
+    const pid = A.proc.createProc([
         () => C.acquire('worker', roomName, name => workerName = name), 
         [ 'gotoSource', () => gotoSource(workerName) ], 
         () => gotoSpawn(workerName), 
         [ 'JUMP', () => true, 'gotoSource' ]
-    ], `${roomName} => Harvest`)
+    ], `${roomName} => Harvest`, true)
+
+    A.proc.trigger('watch', () => Game.rooms[roomName].energyAvailable < Game.rooms[roomName].energyCapacityAvailable, [ pid ])
 }
 
 /** AI 注册入口 */

@@ -1,4 +1,4 @@
-import { assertWithMsg, generate_random_hex, log, LOG_ERR, LOG_INFO, LOG_PROFILE } from "@/utils"
+import { assertWithMsg, generate_random_hex, log, LOG_DEBUG, LOG_ERR, LOG_INFO, LOG_PROFILE } from "@/utils"
 
 // -------------------------------------------------------------
 
@@ -8,12 +8,13 @@ import { assertWithMsg, generate_random_hex, log, LOG_ERR, LOG_INFO, LOG_PROFILE
 
 const STOP_STUCK = "stop_stuck"
 const STOP_ERR = "stop_err"
+const STOP_SLEEP = "stop_sleep"
 const OK_STOP_CURRENT = "ok_stop_current"
 const OK_STOP_NEXT = "ok_stop_next"
 const OK_STOP_CUSTOM = "ok_stop_custom"
 
 /** 普通原子函数返回值 */
-type AtomicFuncReturnCode = OK | typeof OK_STOP_CURRENT | typeof OK_STOP_NEXT | [typeof OK_STOP_CUSTOM, string] | [typeof STOP_ERR, string]
+type AtomicFuncReturnCode = OK | typeof OK_STOP_CURRENT | typeof OK_STOP_NEXT | [typeof OK_STOP_CUSTOM, string] | [typeof STOP_ERR, string] | typeof STOP_SLEEP
 /** 可阻塞的原子函数返回值 */
 type StuckableAtomicFuncReturnCode = OK | typeof STOP_STUCK
 
@@ -115,6 +116,7 @@ interface SignalModule {
 export type ProcId = number
 const MAX_PROC_ID = 36767
 
+const PROCESS_STATE_SLEEP = "Sleep"
 const PROCESS_STATE_READY = "Ready"
 const PROCESS_STATE_STUCK = "Stuck"
 const PROCESS_STATE_RUNNING = "Running"
@@ -134,7 +136,7 @@ class Process {
     /** Tag 到对应原子函数行数的映射 (缓存加速) */
     tagDict: {[tag: string]: number}
     /** 进程状态 */
-    state: typeof PROCESS_STATE_READY | typeof PROCESS_STATE_STUCK | typeof PROCESS_STATE_RUNNING
+    state: typeof PROCESS_STATE_SLEEP | typeof PROCESS_STATE_READY | typeof PROCESS_STATE_STUCK | typeof PROCESS_STATE_RUNNING
     /** 记录进程的时间花销 */
     #cpuCost: number
 
@@ -202,6 +204,8 @@ class ProcessModule {
     #STOP_STUCK: typeof STOP_STUCK = STOP_STUCK
     /** 原子函数返回值 - 错误, 在下一 tick 重启运行该进程 */
     STOP_ERR: typeof STOP_ERR = STOP_ERR
+    /** 原子函数返回值 - 休眠, 在特定条件下再触发 */
+    STOP_SLEEP: typeof STOP_SLEEP = STOP_SLEEP
 
     /**
      * 辅助变量与函数定义
@@ -212,6 +216,8 @@ class ProcessModule {
     #processIdReadyQueue: ProcId[] = []
     /** 阻塞进程 Id 队列 */
     #processIdStuckQueue: ProcId[] = []
+    /** 休眠进程 Id 队列 */
+    #processIdSleepQueue: ProcId[] = []
     /** 映射进程 Id 到进程实体 */
     #procDict: {[ id: ProcId ]: Process} = {}
     /** 断言进程 Id 存在, 用于检查 */
@@ -260,6 +266,12 @@ class ProcessModule {
         } else if ( state === PROCESS_STATE_RUNNING ) {
             // 唤醒运行中进程
             throw `Error: 进程 ${proc} 处于运行态, 无法被唤醒`
+        } else if ( state === PROCESS_STATE_SLEEP ) {
+            // 唤醒睡眠中进程
+            // 从睡眠进程 Id 队列中删除
+            _.pull(this.#processIdSleepQueue, id)
+            // 将进程 Id 加入就绪进程 Id 队列中
+            this.#processIdReadyQueue.push(id)
         }
         // 调整状态为就绪
         proc.state = PROCESS_STATE_READY
@@ -283,6 +295,9 @@ class ProcessModule {
             this.#currentProcId = -1
         } else if ( state === PROCESS_STATE_STUCK ) {
             throw `Error: 进程 ${proc} 已经处于阻塞态, 无法再次被阻塞`
+        } else if ( state === PROCESS_STATE_SLEEP ) {
+            // 阻塞睡眠中进程
+            throw `Error: 进程 ${proc} 处于睡眠态, 无法被阻塞`
         }
 
         // 调整状态为阻塞
@@ -317,6 +332,10 @@ class ProcessModule {
             // 销毁阻塞进程
             // 从阻塞进程 Id 队列中删去
             _.pull(this.#processIdStuckQueue, id)
+        } else if ( state === PROCESS_STATE_SLEEP ) {
+            // 销毁睡眠进程
+            // 从睡眠进程 Id 队列中删去
+            _.pull(this.#processIdSleepQueue, id)
         }
         
         // 从映射中删去实体
@@ -329,16 +348,26 @@ class ProcessModule {
      * 创建进程
      * @param descriptor 进程具体流程
      * @param description 进程简要描述
+     * @param sleep 进程初始是否是休眠态, 还是就绪态
      * @returns 进程 Id
      */
-    createProc(descriptor: AtomicFuncDescriptor, description: string): ProcId {
+    createProc(descriptor: AtomicFuncDescriptor, description: string, sleep: boolean = false): ProcId {
         const id = this.#getProcId()
         const proc = new Process(id, description, descriptor)
 
         // 将进程注册到映射表中
         this.#procDict[id] = proc
-        // 将新创建的进程加入到就绪队列当中
-        this.#processIdReadyQueue.push(id)
+        if ( !sleep ) {
+            // 初始化进程状态为就绪态
+            proc.state = PROCESS_STATE_READY
+            // 将新创建的进程加入到就绪队列当中
+            this.#processIdReadyQueue.push(id)
+        } else {
+            // 初始化进程状态为休眠态
+            proc.state = PROCESS_STATE_SLEEP
+            // 将新创建的进程加入到休眠队列当中
+            this.#processIdSleepQueue.push(id)
+        }
 
         return id
     }
@@ -355,9 +384,42 @@ class ProcessModule {
      * 的进程也会被执行.
      */
     tick(): void {
-        log(LOG_INFO, `开始运行进程, 进程池当前大小为 ${this.#processIdReadyQueue.length} ...`)
         // 检验为本 tick 第一次调用
         assertWithMsg(this.#lastTick === -1 || this.#lastTick !== Game.time, `进程模块在 ${Game.time} 被重复调用 tick 函数`)
+        /** 监视器执行 */
+        log(LOG_INFO, `开始运行监视, 监视列表当前大小为 ${this.#watchList.length} ...`)
+        for ( const watchElement of this.#watchList ) {
+            if ( watchElement.lastTick === Game.time )
+                continue
+            else {
+                assertWithMsg( watchElement.lastTick === Game.time - 1, `监视器中监视项目上一次被检查时间为 ${watchElement.lastTick}, 但应当为上一个 tick ${Game.time - 1}` )
+                const lastValue = watchElement.lastValue
+                const thisValue = watchElement.func()
+                watchElement.lastTick = Game.time
+                watchElement.lastValue = thisValue
+                log(LOG_DEBUG, `监视项目: ${lastValue}, ${thisValue}`)
+                // 由假变真
+                if ( !lastValue && thisValue ) {
+                    log(LOG_DEBUG, `触发进程 ${_.map(watchElement.wakeUpProcIdList, id => this.#procDict[id])}`)
+                    const wakeUpProcIdList = []
+                    for ( const pid of watchElement.wakeUpProcIdList ) {
+                        // 此时允许 pid 不存在
+                        if ( !(pid in this.#procDict) ) continue
+                        wakeUpProcIdList.push(pid)
+                        const proc = this.#procDict[pid]
+                        // 此时除睡眠外, 允许进程状态为就绪, 阻塞
+                        assertWithMsg( proc.state !== PROCESS_STATE_RUNNING, `触发进程 ${proc} 时, 进程不应该处于运行态` )
+                        // 当且仅当进程为睡眠态时, 才由触发器进行触发
+                        if ( proc.state === PROCESS_STATE_SLEEP )
+                            this.#wakeUpProc(pid)
+                    }
+                    watchElement.wakeUpProcIdList = wakeUpProcIdList
+                }
+            }
+        }
+
+        /** 进程执行 */
+        log(LOG_INFO, `开始运行进程, 进程池当前大小为 ${this.#processIdReadyQueue.length} ...`)
         // 校验当前没有正在运行的进程
         assertWithMsg(this.#currentProcId === -1, `进程模块在 tick 开始时, 发现已有正在运行的进程 Id ${this.#currentProcId}`)
         // 创建临时就绪进程 Id 队列
@@ -425,6 +487,15 @@ class ProcessModule {
                             // 复原状态
                             this.#currentProcId = -1
                         }
+                        break
+                    } else if (returnCode === this.STOP_SLEEP) {
+                        // 休眠, 此时不应被信号量唤醒
+                        // 下次从头开始
+                        proc.state = PROCESS_STATE_SLEEP
+                        this.#processIdSleepQueue.push(id)
+                        proc.pc = 0
+                        // 复原状态
+                        this.#currentProcId = -1
                         break
                     } else if (returnCode === this.#STOP_STUCK) {
                         // 阻塞, 下次仍然从同一条原子函数开始执行
@@ -534,33 +605,33 @@ class ProcessModule {
     }
 
     /** 映射信号量 Id 到信号量实体 */
-    #signalDict: {[id: string]: Signal} = {}
+    private signalDict: {[id: string]: Signal} = {}
     /** 实例上的信号量模块 */
     signal: SignalModule
 
     #signalCreateSignal(value: number) {
         const id = getSignalId()
-        this.#signalDict[id] = new Signal(id, value)
+        this.signalDict[id] = new Signal(id, value)
         return id
     }
 
     #signalDestroySignal(signalId: string) {
-        assertWithMsg( signalId in this.#signalDict, `无法找到信号量 ${signalId} 以销毁` )
+        assertWithMsg( signalId in this.signalDict, `无法找到信号量 ${signalId} 以销毁` )
         
-        const signal = this.#signalDict[signalId]
+        const signal = this.signalDict[signalId]
         // 当信号量销毁时, 会唤醒所有阻塞的进程
         for (const [pid, lb] of signal.stuckList)
             this.#wakeUpProc(pid)
         signal.stuckList = []
         
-        delete this.#signalDict[signalId]
+        delete this.signalDict[signalId]
     }
 
     #signalSwait(...signals: {signalId: string, lowerbound: number, request: number}[]): StuckableAtomicFuncReturnCode {
         const pid = this.#currentProcId
         
         for (const signalDescriptor of signals) {
-            const signal = this.#signalDict[signalDescriptor.signalId]
+            const signal = this.signalDict[signalDescriptor.signalId]
             // 找不到信号量 (可能已经销毁)
             if (!signal) continue
             if (signal.value < signalDescriptor.lowerbound) {
@@ -575,7 +646,7 @@ class ProcessModule {
         }
 
         for (const signalDescriptor of signals) {
-            const signal = this.#signalDict[signalDescriptor.signalId]
+            const signal = this.signalDict[signalDescriptor.signalId]
             // 找不到信号量 (可能已经销毁)
             if (!signal) continue
             signal.value -= signalDescriptor.request
@@ -590,7 +661,7 @@ class ProcessModule {
         // assertWithMsg( pid !== -1, `在激活信号集 ${signals.map(o => o.signalId)} 时, 无法找到正在运行的进程` )
         
         for (const signalDescriptor of signals) {
-            const signal = this.#signalDict[signalDescriptor.signalId]
+            const signal = this.signalDict[signalDescriptor.signalId]
             // 找不到信号量 (可能已经销毁)
             if (!signal) continue
             signal.value += signalDescriptor.request
@@ -601,6 +672,36 @@ class ProcessModule {
         }
         
         return this.OK
+    }
+
+    /** 触发器模块 */
+
+    #watchList: {
+        lastTick: number, 
+        lastValue: boolean, 
+        func: () => boolean, 
+        wakeUpProcIdList: ProcId[]
+    }[] = []
+
+    /** 监视类触发, 当条件 (同 tick 内稳定) 由假变为真时, 唤醒休眠中进程 */
+    trigger( token: 'watch', func: () => boolean, wakeUpProcIdList: ProcId[] ): void
+    /** 执行类触发, 当特定函数执行 (通常为原型上函数) 后, 触发特定函数 */
+    trigger( token: 'after', prototype: Object, funcName: string, afterFunc: ( returnValue: any, ...args ) => void ): void
+    trigger( token, arg1, arg2, arg3?) {
+        if ( token === 'watch' ) {
+            this.#watchList.push({
+                lastTick: Game.time, 
+                lastValue: false, // 初始为 false, 从而刚开始为 true 时, 直接触发
+                func: arg1, 
+                wakeUpProcIdList: arg2
+            })
+        } else if ( token === 'after' ) {
+            const func = arg1[arg2]
+            arg1[arg2] = function (...args) {
+                const returnValue = func.call(this, ...args)
+                arg3(returnValue, ...args)
+            }
+        }
     }
 
     constructor() {
@@ -723,7 +824,7 @@ class StructureResourceManager {
     }
     /** 获得资源的具体数值 */
     getValue(resourceType: ResourceType): number {
-        return Apollo.proc['#signalDict'][this.getSignal(resourceType)].value
+        return (Apollo.proc as any).signalDict[this.getSignal(resourceType)].value
     }
     constructor(id: Id<StorableStructure>) {
         this.#id = id

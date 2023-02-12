@@ -3,7 +3,7 @@
  */
 
 import { Apollo as A } from "@/framework/apollo"
-import { assertWithMsg, generate_random_hex, largest_less_than } from "@/utils"
+import { assertWithMsg, generate_random_hex, largest_less_than, log, LOG_DEBUG } from "@/utils"
 
 /**
  * 外部接口依赖
@@ -97,8 +97,6 @@ class CreepModule {
             busy: string[], 
             /** 正在生成的 Creep 数量 (已经加入到生成队列中) */
             spawning: number, 
-            /** 排队需求 Creep 的数量 */
-            waiting: number, 
             /** 数量控制信号量 Id (本质上是对应的 就绪序列 长度) */
             signalId: string, 
             /** 最后一次 Check 是否有消亡的 tick (防止同一 tick 多次申请引发多次无效 Check) */
@@ -110,8 +108,13 @@ class CreepModule {
     
     #getRepo(type: string, roomName: string) {
         if ( !(type in this.#repo) ) this.#repo[type] = {}
-        if ( !(roomName in this.#repo[type]) ) this.#repo[type][roomName] = { ready: [], busy: [], spawning: 0, waiting: 0, signalId: A.proc.signal.createSignal(0), lastCheckTick: Game.time - 1, requestEMA: null }
+        if ( !(roomName in this.#repo[type]) ) this.#repo[type][roomName] = { ready: [], busy: [], spawning: 0, signalId: A.proc.signal.createSignal(0), lastCheckTick: Game.time - 1, requestEMA: null }
         return this.#repo[type][roomName]
+    }
+
+    #getWaiting(type: string, roomName: string): number {
+        const signalId = this.#getRepo(type, roomName).signalId
+        return (A.proc as any).signalDict[signalId].stuckList.length
     }
     /**
      * 申请特定型号的 Creep
@@ -139,13 +142,14 @@ class CreepModule {
             const name = _.sortBy( repo.ready, creepName => Game.creeps[creepName].pos.roomName !== roomName? Infinity : ( workPos? Game.creeps[creepName].pos.getRangeTo(workPos) : 0 ) )[0]
             assertWithMsg( A.proc.signal.Swait({ signalId: repo.signalId, lowerbound: 1, request: 1 }) === OK, `申请 模块型号 '${type}', 管辖房间 '${roomName}' 的 Creep 时, 管理闲置数量的信号量数值与闲置数量不匹配` )
             _.remove( repo.ready, v => v === name )
+            repo.busy.push(name)
             callback(name)
             return OK
         } else {
-            repo.waiting += 1
+            const ret = A.proc.signal.Swait({ signalId: repo.signalId, lowerbound: 1, request: 1 })
             // 请求时判定: 是否需要生产新的 Creep
             this.#replenish(type, roomName)
-            return A.proc.signal.Swait({ signalId: repo.signalId, lowerbound: 1, request: 1 })
+            return ret
         }
     }
     /**
@@ -196,8 +200,8 @@ class CreepModule {
         const descriptor = this.#types[type][controllerLevel]
         const repo = this.#getRepo(type, roomName)
         const currentAmount = repo.ready.length + repo.busy.length + repo.spawning
-        const currentRequest = repo.busy.length + repo.waiting
-
+        const currentRequest = repo.busy.length + this.#getWaiting(type, roomName)
+        
         if ( typeof descriptor.amount === "number" ) {
             // 限定最大数量 ( 限定数量 与 请求之间的最大值 )
             return Math.min(currentRequest, descriptor.amount)
@@ -217,7 +221,7 @@ class CreepModule {
         const repo = this.#getRepo(type, roomName)
         const currentAmount = repo.ready.length + repo.busy.length + repo.spawning
         const expectedAmount = this.#getExpectedAmount(type, roomName)
-
+        log(LOG_DEBUG, `检查管辖房间 ${roomName}, 型号 ${type} Creep: ${currentAmount}/${expectedAmount}`)
         for ( let i = 0; i < expectedAmount - currentAmount; ++i ) this.#issue(type, roomName)
     }
     
@@ -304,7 +308,7 @@ class CreepModule {
         A.timer.add(Game.time + 1, () => {
             for (const type in this.#repo)
                 for (const roomName in this.#repo[type]) {
-                    const currentRequest = this.#repo[type][roomName].busy.length + this.#repo[type][roomName].waiting
+                    const currentRequest = this.#repo[type][roomName].busy.length + this.#getWaiting(type, roomName)
                     if ( this.#repo[type][roomName].requestEMA === null ) this.#repo[type][roomName].requestEMA = currentRequest
                     else this.#repo[type][roomName].requestEMA = this.#repo[type][roomName].requestEMA * this.#emaBeta + currentRequest * (1 - this.#emaBeta)
                 }
@@ -335,6 +339,7 @@ type RequestCreepType = {
 
 class CreepSpawnModule {
     #repo: { [roomName: string]: { [priority: number]: RequestCreepType[] } } = {}
+    #issuedRoomNames: string[] = []
 
     issueRegisterAfterSpawn(creepName: string, callback: (name: string) => void): void {
         A.timer.add(Game.time + 1, (name, callback) => {
@@ -351,53 +356,86 @@ class CreepSpawnModule {
         this.#repo[roomName][priority].push({ callback, cost: calculateBodyCost(body), body, requestTick: Game.time, memory, workPos, requestId: generate_random_hex(32) })
     }
 
-    constructor() {
-        // 轮询是否本 tick 生产新的 Creep
-        A.timer.add(Game.time + 1, () => {
-            for (const roomName in this.#repo) {
-                // 每 tick 只检查一次
-                const spawns = Game.rooms[roomName].find<FIND_MY_STRUCTURES, StructureSpawn>(FIND_MY_STRUCTURES, {filter: {structureType: STRUCTURE_SPAWN}})
-                const availableSpawns = _.filter(spawns, s => !s.spawning )
-                if ( availableSpawns.length === 0 ) continue
+    #calRequestAmount(roomName: string): number {
+        if ( !(roomName in this.#repo) ) return 0
+        let amount = 0
+        for ( const priority in this.#repo[roomName] )
+            amount += this.#repo[roomName][priority].length
+        return amount
+    }
 
-                // 按照优先级别顺序
-                const priorities = _.sortBy(Object.keys(this.#repo[roomName]))
-                let flag = false
-                for (const priority of priorities) {
-                    // 最高响应比优先调度算法
-                    // 这里等待 tick 乘以的系数应当最好为每秒本房间
-                    // energy 的产量
-                    const orders = _.sortBy(this.#repo[roomName][priority], (element: RequestCreepType) => -((Game.time - element.requestTick) * 50.0 + element.cost) / element.cost)
-                    for (const order of orders) {
-                        // 检查是否为特定 Spawn
-                        let spawn: StructureSpawn = null
-                        if ( order.workPos && _.any(spawns, s => s.pos.getRangeTo(order.workPos) <= 1 ) ) {
-                            spawn = _.select(spawns, s => s.pos.getRangeTo(order.workPos) <= 1)[0]
-                            if ( !_.any(availableSpawns, s => s.id === spawn.id) ) continue
-                        } else
-                            spawn = availableSpawns[0]
-                        
-                        // 无论能量够不够, 都不再往后检查
-                        flag = true
-                        if ( Game.rooms[roomName].energyAvailable >= order.cost ) {
-                            let name = null
-                            while ( !name || name in Game.creeps )
-                                name = `${roomName}-${generate_random_hex(4)}`
-                            const spawnReturn = spawn.spawnCreep(order.body, name, {
-                                memory: order.memory, 
-                                directions: (order.workPos && spawn.pos.getRangeTo(order.workPos) <= 1)? [ spawn.pos.getDirectionTo(order.workPos) ] : undefined
-                            })
-                            assertWithMsg(spawnReturn === OK, `生产 Creep [${order.body}; ${roomName}] 时, 选定的 Spawn [${spawn.id}] 无法成功生产 Creep (ERR Code: ${spawnReturn})`)
-                            this.issueRegisterAfterSpawn( name, order.callback )
-                            // 删除成功 Spawn 的订单
-                            _.remove(this.#repo[roomName][priority] as RequestCreepType[], o => o.requestId === order.requestId)
-                        }
-                        break
+    #issueRoomSpawnProc(roomName: string) {
+        if ( _.includes(this.#issuedRoomNames, roomName) ) {
+            log(LOG_DEBUG, `${roomName} 已经有进程控制 Creep 生产, 但是收到再次创建同样进程的请求. 可能是房间丢失后重新获得?`)
+            return
+        } else this.#issuedRoomNames.push(roomName)
+
+        const roomSpawnProc = () => {
+            // 房间丢失的情况, 则进程休眠
+            if ( !(roomName in Game.rooms) || !Game.rooms[roomName].controller.my ) return A.proc.STOP_SLEEP
+            if ( !(roomName in this.#repo) ) return A.proc.STOP_SLEEP
+            // 每 tick 只检查一次
+            const spawns = Game.rooms[roomName].find<FIND_MY_STRUCTURES, StructureSpawn>(FIND_MY_STRUCTURES, {filter: {structureType: STRUCTURE_SPAWN}})
+            const availableSpawns = _.filter(spawns, s => !s.spawning )
+            if ( availableSpawns.length === 0 ) return A.proc.OK_STOP_CURRENT
+
+            // 按照优先级别顺序
+            const priorities = _.sortBy(Object.keys(this.#repo[roomName]))
+            let flag = false
+            for (const priority of priorities) {
+                // 最高响应比优先调度算法
+                // 这里等待 tick 乘以的系数应当最好为每秒本房间
+                // energy 的产量
+                const orders = _.sortBy(this.#repo[roomName][priority], (element: RequestCreepType) => -((Game.time - element.requestTick) * 50.0 + element.cost) / element.cost)
+                log(LOG_DEBUG, `${roomName} 当前优先级为 ${priority} 的等待生产 Creep 的数量为 ${orders.length}`)
+                for (const order of orders) {
+                    // 检查是否为特定 Spawn
+                    let spawn: StructureSpawn = null
+                    if ( order.workPos && _.any(spawns, s => s.pos.getRangeTo(order.workPos) <= 1 ) ) {
+                        spawn = _.select(spawns, s => s.pos.getRangeTo(order.workPos) <= 1)[0]
+                        if ( !_.any(availableSpawns, s => s.id === spawn.id) ) continue
+                    } else
+                        spawn = availableSpawns[0]
+                    
+                    // 无论能量够不够, 都不再往后检查
+                    flag = true
+                    if ( Game.rooms[roomName].energyAvailable >= order.cost ) {
+                        let name = null
+                        while ( !name || name in Game.creeps )
+                            name = `${roomName}-${generate_random_hex(4)}`
+                        const spawnReturn = spawn.spawnCreep(order.body, name, {
+                            memory: order.memory, 
+                            directions: (order.workPos && spawn.pos.getRangeTo(order.workPos) <= 1)? [ spawn.pos.getDirectionTo(order.workPos) ] : undefined
+                        })
+                        assertWithMsg(spawnReturn === OK, `生产 Creep [${order.body}; ${roomName}] 时, 选定的 Spawn [${spawn.id}] 无法成功生产 Creep (ERR Code: ${spawnReturn})`)
+                        this.issueRegisterAfterSpawn( name, order.callback )
+                        // 删除成功 Spawn 的订单
+                        _.remove(this.#repo[roomName][priority] as RequestCreepType[], o => o.requestId === order.requestId)
                     }
-                    if ( flag ) break
+                    break
                 }
+                if ( flag ) break
             }
-        }, [], `轮询检查每个管辖房间是否生产新的 Creep`, 1)
+            const remainingOrderAmount = this.#calRequestAmount(roomName)
+            return remainingOrderAmount > 0? A.proc.OK_STOP_CURRENT : A.proc.STOP_SLEEP
+        }
+        const pid = A.proc.createProc([ roomSpawnProc ], `${roomName} => Spawn`)
+        A.proc.trigger('watch', () => {
+            if ( !(roomName in Game.rooms) || !Game.rooms[roomName].controller.my ) return false
+            const remainingOrderAmount = this.#calRequestAmount(roomName)
+            return remainingOrderAmount > 0
+        }, [ pid ])
+    }
+
+    constructor() {
+        for ( const roomName in Game.rooms ) {
+            if ( Game.rooms[roomName].controller && Game.rooms[roomName].controller.my )
+                this.#issueRoomSpawnProc(roomName)
+        }
+        A.proc.trigger('after', Creep.prototype, 'claimController', (returnValue: CreepActionReturnCode, target: StructureController) => {
+            if ( returnValue === OK )
+                this.#issueRoomSpawnProc(target.room.name)
+        })
     }
 }
 
