@@ -47,3 +47,24 @@ export function largest_less_than<T>(array: T[], val: T, equalto: boolean = true
     }
     return largest
 }
+
+/** 构建数组 */
+export function constructArray<T>(dimensions: number[], fillIn: T) {
+    const ret = []
+    const constructor = (array, index) => {
+        if (index < dimensions.length - 1)
+            for (let i = 0; i < dimensions[index]; i++) {
+                array.push([])
+                array[i] = constructor(array[i], index + 1)
+            }
+        else if (index === dimensions.length - 1) 
+            for (let i = 0; i < dimensions[index]; i++) {
+                // 特殊情况: [] (加速)
+                if (Array.isArray(fillIn) && fillIn.length === 0) array.push([])
+                else if (typeof fillIn === "object") array.push(JSON.parse(JSON.stringify(fillIn)))
+                else array.push(fillIn)
+            }
+        return array
+    }
+    return constructor(ret, 0)
+}
