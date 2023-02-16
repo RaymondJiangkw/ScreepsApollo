@@ -14,7 +14,7 @@ const OK_STOP_NEXT = "ok_stop_next"
 const OK_STOP_CUSTOM = "ok_stop_custom"
 
 /** 普通原子函数返回值 */
-type AtomicFuncReturnCode = OK | typeof OK_STOP_CURRENT | typeof OK_STOP_NEXT | [typeof OK_STOP_CUSTOM, string] | [typeof STOP_ERR, string] | typeof STOP_SLEEP
+type AtomicFuncReturnCode = OK | typeof OK_STOP_CURRENT | typeof OK_STOP_NEXT | [typeof OK_STOP_CUSTOM, string] | [typeof STOP_ERR, string] | typeof STOP_SLEEP | [typeof STOP_SLEEP, number]
 /** 可阻塞的原子函数返回值 */
 type StuckableAtomicFuncReturnCode = OK | typeof STOP_STUCK
 
@@ -107,6 +107,8 @@ interface SignalModule {
     Swait(...signals: {signalId: string, lowerbound: number, request: number}[]): StuckableAtomicFuncReturnCode
     /** @atom 激活一个信号量集, 只能在进程流程中运行使用 */
     Ssignal(...signals: {signalId: string, request: number}[]): StuckableAtomicFuncReturnCode
+    /** 获得信号量的值 */
+    getValue(signalId: string): number
 }
 
 /**
@@ -397,7 +399,7 @@ class ProcessModule {
                 const thisValue = watchElement.func()
                 watchElement.lastTick = Game.time
                 watchElement.lastValue = thisValue
-                log(LOG_DEBUG, `监视项目: ${lastValue}, ${thisValue}`)
+                // log(LOG_DEBUG, `监视项目: ${lastValue}, ${thisValue}`)
                 // 由假变真
                 if ( !lastValue && thisValue ) {
                     log(LOG_DEBUG, `触发进程 ${_.map(watchElement.wakeUpProcIdList, id => this.#procDict[id])}`)
@@ -430,7 +432,7 @@ class ProcessModule {
             const id = this.#processIdReadyQueue.shift()
             const proc = this.#procDict[id]
 
-            log(LOG_INFO, `运行🔄 进程 [${proc.description}] ...`)
+            // log(LOG_INFO, `运行🔄 进程 [${proc.description}] ...`)
 
             // 修改状态
             this.#currentProcId = id
@@ -496,6 +498,17 @@ class ProcessModule {
                         proc.pc = 0
                         // 复原状态
                         this.#currentProcId = -1
+                        break
+                    } else if (Array.isArray(returnCode) && returnCode[0] === this.STOP_SLEEP) {
+                        // 休眠, 此时不应被信号量唤醒
+                        // 下次从头开始
+                        proc.state = PROCESS_STATE_SLEEP
+                        this.#processIdSleepQueue.push(id)
+                        proc.pc = 0
+                        // 复原状态
+                        this.#currentProcId = -1
+                        // 定时唤醒
+                        Apollo.timer.add( Game.time + returnCode[1], pid => this.#wakeUpProc(pid), [ proc.pid ], `定时唤醒 ${proc}` )
                         break
                     } else if (returnCode === this.#STOP_STUCK) {
                         // 阻塞, 下次仍然从同一条原子函数开始执行
@@ -686,7 +699,7 @@ class ProcessModule {
     /** 监视类触发, 当条件 (同 tick 内稳定) 由假变为真时, 唤醒休眠中进程 */
     trigger( token: 'watch', func: () => boolean, wakeUpProcIdList: ProcId[] ): void
     /** 执行类触发, 当特定函数执行 (通常为原型上函数) 后, 触发特定函数 */
-    trigger( token: 'after', prototype: Object, funcName: string, afterFunc: ( returnValue: any, ...args ) => void ): void
+    trigger( token: 'after', prototype: Object, funcName: string, afterFunc: ( returnValue: any, subject: Object, ...args ) => void ): void
     trigger( token, arg1, arg2, arg3?) {
         if ( token === 'watch' ) {
             this.#watchList.push({
@@ -699,7 +712,7 @@ class ProcessModule {
             const func = arg1[arg2]
             arg1[arg2] = function (...args) {
                 const returnValue = func.call(this, ...args)
-                arg3(returnValue, ...args)
+                arg3(returnValue, this, ...args)
             }
         }
     }
@@ -721,7 +734,11 @@ class ProcessModule {
             createSignal: (value: number) => this.#signalCreateSignal(value), 
             destroySignal: (signalId: string) => this.#signalDestroySignal(signalId), 
             Swait: (...signals: {signalId: string, lowerbound: number, request: number}[]) => this.#signalSwait(...signals), 
-            Ssignal: (...signals: {signalId: string, request: number}[]) => this.#signalSsignal(...signals)
+            Ssignal: (...signals: {signalId: string, request: number}[]) => this.#signalSsignal(...signals), 
+            getValue: (signalId: string) => {
+                if ( !(signalId in this.signalDict) ) return null
+                else return this.signalDict[signalId].value
+            }
         }
     }
 }
@@ -773,18 +790,6 @@ function parseAmountDescriptor(amountDescriptor: AmountDescriptor): { lowerbound
         return amountDescriptor
 }
 
-/** 可存取的建筑, 并不包含 Ruin 和 TombStone */
-interface StorableStructure extends OwnedStructure {
-    /**
-     * A Store object that contains cargo of this structure.
-     */
-    store: StoreDefinition |
-            Store<RESOURCE_ENERGY, false> | // Spawn, Extension
-            Store<RESOURCE_ENERGY | RESOURCE_POWER, false> | // PowerSpawn
-            Store<RESOURCE_ENERGY | MineralConstant | MineralCompoundConstant, false> | // Lab
-            Store<RESOURCE_ENERGY | RESOURCE_GHODIUM, false> // Nuker
-}
-
 /**
  * 建筑资源管理
  * 不对外公开
@@ -797,13 +802,32 @@ class StructureResourceManager {
     getSignal(resourceType: ResourceType) {
         if (resourceType in this.#resourceDict)
             return this.#resourceDict[resourceType]
-        /** 创建信号量 */
+        const value = this.getRealValue(resourceType)
+        // 校验资源有效性
+        assertWithMsg( value !== null, `在向 ${this.#id} 获得 ${resourceType} 信号量时, 发现其不支持 ${resourceType} 的存储` )
+        return this.#resourceDict[resourceType] = Apollo.proc.signal.createSignal(value)
+    }
+    /** 获得资源的具体数值 */
+    getValue(resourceType: ResourceType): number {
+        return Apollo.proc.signal.getValue(this.getSignal(resourceType))
+    }
+    /** 获得资源的实际数值 */
+    getRealValue(resourceType: ResourceType): number {
         const structure = Game.getObjectById(this.#id)
+        if ( !structure ) return null
         // 获取资源数值
         let value: number = null
-        if (resourceType === CAPACITY)
-            value = structure.store.getFreeCapacity()
-        else if (resourceType === CAPACITY_ENERGY)
+        if (resourceType === CAPACITY) {
+            if ( structure instanceof StructureExtension )
+                value = structure.store.getFreeCapacity(RESOURCE_ENERGY)
+            else if ( structure instanceof StructureLink )
+                value = structure.store.getFreeCapacity(RESOURCE_ENERGY)
+            else if ( structure instanceof StructureSpawn )
+                value = structure.store.getFreeCapacity(RESOURCE_ENERGY)
+            else if ( structure instanceof StructureTower )
+                value = structure.store.getFreeCapacity(RESOURCE_ENERGY)
+            else value = structure.store.getFreeCapacity()
+        } else if (resourceType === CAPACITY_ENERGY)
             value = structure.store.getFreeCapacity(RESOURCE_ENERGY)
         else if (resourceType === CAPACITY_MINERAL) {
             if (structure instanceof StructureLab) {
@@ -814,21 +838,26 @@ class StructureResourceManager {
             } else if (structure instanceof StructureNuker) {
                 value = structure.store.getFreeCapacity(RESOURCE_GHODIUM)
             } else
-                throw `在向 ${structure} 获得 CAPACITY_MINERAL 信号量时, 发现其没有专门存储矿物的容量`
+                throw new Error(`在向 ${structure} 获得 CAPACITY_MINERAL 信号量时, 发现其没有专门存储矿物的容量`)
         } else
             value = structure.store.getUsedCapacity(resourceType)
-        // 校验资源有效性
-        if (value === null)
-            throw `在向 ${structure} 获得 ${resourceType} 信号量时, 发现其不支持 ${resourceType} 的存储`
-        return this.#resourceDict[resourceType] = Apollo.proc.signal.createSignal(value)
-    }
-    /** 获得资源的具体数值 */
-    getValue(resourceType: ResourceType): number {
-        return (Apollo.proc as any).signalDict[this.getSignal(resourceType)].value
+        return value
     }
     constructor(id: Id<StorableStructure>) {
         this.#id = id
         this.#resourceDict = {}
+
+        // 初次注册, 登记所有目前已知的建筑
+        const structure = Game.getObjectById(id)
+        assertWithMsg( structure? true : false )
+        for ( const resourceType in structure.store )
+            this.getSignal(resourceType as ResourceConstant)
+        
+        // 处理 Capacity
+        if ( structure instanceof StructureLab || structure instanceof StructureNuker || structure instanceof StructurePowerSpawn ) {
+            this.getSignal(CAPACITY_ENERGY)
+            this.getSignal(CAPACITY_MINERAL)
+        } else this.getSignal(CAPACITY)
     }
 }
 
@@ -847,9 +876,9 @@ type RequestDescriptor = {
 class ResourceModule {
     /** 容量 - 资源常量 */
     CAPACITY: typeof CAPACITY = CAPACITY
-    /** 能量容量 - 资源常量 */
+    /** 能量容量 - 资源常量 (用于 Lab, Nuker, PowerSpawn) */
     CAPACITY_ENERGY: typeof CAPACITY_ENERGY = CAPACITY_ENERGY
-    /** 矿物容量 - 资源常量 */
+    /** 矿物容量 - 资源常量 (用于 Lab, Nuker, PowerSpawn) */
     CAPACITY_MINERAL: typeof CAPACITY_MINERAL = CAPACITY_MINERAL
     /** 映射建筑 Id 到建筑资源管理 */
     #structureDict: {[id: Id<StorableStructure>]: StructureResourceManager} = {}
@@ -871,10 +900,10 @@ class ResourceModule {
         if (!Array.isArray(target)) target = [ target ]
 
         return Apollo.proc.signal.Swait(
-            ...target.map(v => { return {
+            ...target.map(v => ( {
                 signalId: this.#getStructureResourceManager(v.id).getSignal(v.resourceType), 
                 ...parseAmountDescriptor(v.amount), 
-            } })
+            } ))
         )
     }
     /**
@@ -892,9 +921,63 @@ class ResourceModule {
     /**
      * 查询资源预期状况
      */
-    qeury(target: Id<StorableStructure>, resourceType: ResourceType) {
+    #qeuryExpected(target: Id<StorableStructure>, resourceType: ResourceType) {
         const manager = this.#getStructureResourceManager(target)
         return manager.getValue(resourceType)
+    }
+    /**
+     * 查询资源实际状况
+     */
+    #qeuryReal(target: Id<StorableStructure>, resourceType: ResourceType) {
+        const manager = this.#getStructureResourceManager(target)
+        return manager.getRealValue(resourceType)
+    }
+    qeury(target: Id<StorableStructure>, resourceType: ResourceType) {
+        return Math.min(this.#qeuryExpected(target, resourceType), this.#qeuryReal(target, resourceType))
+    }
+    #room2ResourceSources: { [roomName: string]: { [resourceType in ResourceConstant]?: Id<StorableStructure>[] } } = {}
+    #getResourceSourcesInRoom(roomName: string, resourceType: ResourceType): Id<StorableStructure>[] {
+        if ( !(roomName in this.#room2ResourceSources) ) this.#room2ResourceSources[roomName] = {}
+        if ( !(resourceType in this.#room2ResourceSources[roomName]) ) this.#room2ResourceSources[roomName][resourceType] = []
+        return this.#room2ResourceSources[roomName][resourceType]
+    }
+    /**
+     * 注册房间内资源的一个来源
+     */
+    registerSource(roomName: string, resourceType: ResourceType, source: Id<StorableStructure>) {
+        this.#getResourceSourcesInRoom(roomName, resourceType).push(source)
+    }
+    /**
+     * 删除房间内资源的一个来源
+     */
+    removeSource(roomName: string, resourceType: ResourceType, source: Id<StorableStructure>) {
+        _.pull(this.#getResourceSourcesInRoom(roomName, resourceType), source)
+    }
+    /**
+     * 请求房间内资源的一个来源
+     * @param requestPos 请求资源的发起方位置 - 用于选择来源
+     */
+    requestSource(roomName: string, resourceType: ResourceType, requestPos?: RoomPosition): Id<StorableStructure> | null {
+        const candidates = this.#getResourceSourcesInRoom(roomName, resourceType).filter(id => this.qeury(id, resourceType) > 0 && Game.getObjectById(id))
+        if ( candidates.length === 0 ) return null
+        /** @TODO 优化路径查询 */
+        if ( requestPos ) return _.min(candidates, id => {
+            const res = PathFinder.search(requestPos, Game.getObjectById(id).pos)
+            if ( res.incomplete ) return 0xff
+            else return res.path.length
+        })
+        
+        return _.max(candidates, id => this.qeury(id, resourceType))
+    }
+    print(roomName: string) {
+        if ( !(roomName in this.#room2ResourceSources) ) return
+        for ( const resouceType in this.#room2ResourceSources[roomName] ) {
+            this.#room2ResourceSources[roomName][resouceType as ResourceConstant].forEach(id => {
+                const structure = Game.getObjectById(id)
+                if ( !structure ) return
+                log(LOG_INFO, `${roomName} => ${resouceType}, ${structure}: ${this.#qeuryExpected(id, resouceType as ResourceConstant)} / ${this.#qeuryExpected(id, CAPACITY)}`)
+            })
+        }
     }
 }
 

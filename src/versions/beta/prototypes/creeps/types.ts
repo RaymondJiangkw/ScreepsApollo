@@ -41,11 +41,13 @@ interface TravelToOptions {
     repath?: number;
     route?: {[roomName: string]: boolean};
     ensurePath?: boolean;
+    flee?: boolean;
 }
 
 interface TravelData {
     state: any[];
     path: string;
+    flee: boolean;
 }
 
 interface TravelState {
@@ -56,5 +58,9 @@ interface TravelState {
 }
 
 interface Creep {
+    travelTo(destination: HasPos | RoomPosition, ops?: TravelToOptions): CreepMoveReturnCode | ERR_INVALID_ARGS | ERR_NO_PATH
+}
+
+interface PowerCreep {
     travelTo(destination: HasPos | RoomPosition, ops?: TravelToOptions): CreepMoveReturnCode | ERR_INVALID_ARGS | ERR_NO_PATH
 }

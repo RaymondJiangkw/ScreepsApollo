@@ -36,9 +36,9 @@ export class Traveler {
 
         // manage case where creep is nearby destination
         let rangeToDestination = creep.pos.getRangeTo(destination);
-        if (options.range && rangeToDestination <= options.range) {
-            return OK;
-        } else if (rangeToDestination <= 1) {
+        if (options.range && rangeToDestination <= options.range && !options.flee) return OK;
+        else if ( options.range && rangeToDestination >= options.range && options.flee ) return OK;
+        else if ( rangeToDestination <= 1 && !options.flee ) {
             if (rangeToDestination === 1 && !options.range) {
                 let direction = creep.pos.getDirectionTo(destination);
                 if (options.returnData) {
@@ -53,7 +53,7 @@ export class Traveler {
         // initialize data object
         if (!(creep.memory as any)._trav) {
             delete (creep.memory as any)._travel;
-            (creep.memory as any)._trav = {};
+            (creep.memory as any)._trav = { flee: options.flee || false };
         }
         let travelData = (creep.memory as any)._trav as TravelData;
 
@@ -79,14 +79,14 @@ export class Traveler {
         }
 
         // TODO:handle case where creep moved by some other function, but destination is still the same
-
         // delete path cache if destination is different
-        if (!this.samePos(state.destination, destination)) {
-            if (options.movingTarget && state.destination.isNearTo(destination)) {
+        if (!this.samePos(state.destination, destination) || (options.flee || false) !== travelData.flee) {
+            if ((options.flee || false) === false && options.movingTarget && state.destination.isNearTo(destination)) {
                 travelData.path += state.destination.getDirectionTo(destination);
                 state.destination = destination;
             } else {
                 delete travelData.path;
+                travelData.flee = options.flee || false;
             }
         }
 
@@ -247,9 +247,10 @@ export class Traveler {
                                  options: TravelToOptions = {}): PathfinderReturn {
 
         _.defaults(options, {
-            ignoreCreeps: true,
-            maxOps: DEFAULT_MAXOPS,
-            range: 1,
+            ignoreCreeps: true, 
+            maxOps: DEFAULT_MAXOPS, 
+            range: 1, 
+            flee: false, 
         });
 
         if (options.movingTarget) {
@@ -324,6 +325,7 @@ export class Traveler {
             plainCost: options.offRoad ? 1 : options.ignoreRoads ? 1 : 2,
             swampCost: options.offRoad ? 1 : options.ignoreRoads ? 5 : 10,
             roomCallback: callback,
+            flee: options.flee
         } );
 
         if (ret.incomplete && options.ensurePath) {
@@ -528,6 +530,7 @@ export class Traveler {
 
     public static addCreepsToMatrix(room: Room, matrix: CostMatrix): CostMatrix {
         room.find(FIND_CREEPS).forEach((creep: Creep) => matrix.set(creep.pos.x, creep.pos.y, 0xff) );
+        room.find(FIND_POWER_CREEPS).forEach( (powerCreep: PowerCreep) => matrix.set(powerCreep.pos.x, powerCreep.pos.y, 0xff) );
         return matrix;
     }
 
@@ -623,6 +626,10 @@ const STATE_DEST_ROOMNAME = 6;
 export function mountCreepTravelTo() {
     // assigns a function to Creep.prototype: creep.travelTo(destination)
     Creep.prototype.travelTo = function(destination: RoomPosition|{pos: RoomPosition}, options?: TravelToOptions) {
+        return Traveler.travelTo(this, destination, options);
+    };
+
+    PowerCreep.prototype.travelTo = function(destination: RoomPosition|{pos: RoomPosition}, options?: TravelToOptions) {
         return Traveler.travelTo(this, destination, options);
     };
 }

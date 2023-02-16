@@ -1,4 +1,4 @@
-export function assertWithMsg(condition: boolean, message: string): void {
+export function assertWithMsg(condition: boolean, message: string = 'Assert 时发生错误'): void {
     if ( !condition )
         throw new Error(message)
 }
@@ -67,4 +67,22 @@ export function constructArray<T>(dimensions: number[], fillIn: T) {
         return array
     }
     return constructor(ret, 0)
+}
+
+export function getAvailableSurroundingPos(pos: Pos): Pos[] {
+    const terrain = new Room.Terrain(pos.roomName)
+    const ret: Pos[] = []
+    for ( let dx of [-1, 0, 1] ) {
+        for ( let dy of [-1, 0, 1] ) {
+            if ( dx === 0 && dy === 0 ) continue
+            if ( pos.x + dx < 0 || pos.x + dx >= 50 || pos.y + dy < 0 || pos.y + dy >= 50 ) continue
+            if ( terrain.get( pos.x + dx, pos.y + dy ) === TERRAIN_MASK_WALL ) continue
+            ret.push({ x: pos.x + dx, y: pos.y + dy, roomName: pos.roomName })
+        }
+    }
+    return ret
+}
+
+export function convertPosToString(pos: Pos) {
+    return `[room ${pos.roomName} pos ${pos.x},${pos.y}]`
 }

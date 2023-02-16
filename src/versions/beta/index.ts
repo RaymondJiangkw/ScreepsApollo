@@ -1,6 +1,9 @@
 import { Apollo as A } from '@/framework/apollo'
 import { creepModule as C } from '@/modules/creep'
-import { planModule as P, Unit } from '@/modules/plan'
+import { planModule as P } from '@/modules/plan'
+import { assertWithMsg, getAvailableSurroundingPos, log, LOG_DEBUG, LOG_INFO } from '@/utils'
+import { registerCommonConstructions } from './config.construction'
+import { issueHarvestSource, registerHarvestSource } from './modules/harvestSource'
 import { mountAllPrototypes } from './prototypes'
 
 /** AI 挂载入口 */
@@ -8,37 +11,66 @@ export function mountAll() {
     mountAllPrototypes()
 }
 
-function issueUpgradeProc(roomName: string) {
-    let workerName = null
-
-    function gotoSource(name: string) {
+function getEnergy(roomName: string, getWorkerName: () => string, setWorkerName: ( name: string ) => void) {
+    let targetId: Id<Source> | Id<StorableStructure> = null
+    return function() {
+        const name = getWorkerName()
+        assertWithMsg( typeof name === 'string' )
         const creep = Game.creeps[name]
         /** 检测到错误, 立即释放资源 */
         if ( !creep ) {
             C.cancel(name)
-            workerName = null
+            setWorkerName(null)
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
         }
 
         /** 已经装满 Energy */
-        if ( creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0 ) return A.proc.OK
+        if ( creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0 ) {
+            targetId = null
+            return A.proc.OK
+        }
 
         /** 确认房间位置 */
         if ( creep.pos.roomName !== roomName ) {
             creep.moveToRoom(roomName)
             return A.proc.OK_STOP_CURRENT
         }
-        
-        /** 移动到 Source 位置 */
-        const source = creep.pos.findClosestByRange(FIND_SOURCES)
-        if ( creep.pos.getRangeTo(source) > 1 ) {
-            creep.travelTo(source)
+
+        if ( targetId === null ) {
+            targetId = A.res.requestSource(roomName, RESOURCE_ENERGY, creep.pos)
+            if ( !targetId ) {
+                // Source 旁边的空位应当 > 1
+                const source = creep.pos.findClosestByRange(FIND_SOURCES, { filter: s => s.energy > 0 && getAvailableSurroundingPos(s.pos).length > 1 })
+                if ( source ) targetId = source.id
+                else if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) > 0 ) return A.proc.OK
+                else return A.proc.OK_STOP_CURRENT
+            }
+        }
+
+        const target = Game.getObjectById(targetId)
+        if ( creep.pos.getRangeTo(target) > 1 ) {
+            creep.travelTo(target)
             return A.proc.OK_STOP_CURRENT
         }
 
-        if ( source.energy > 0 ) creep.harvest(source)
+        if ( target instanceof Source ) {
+            if ( target.energy > 0 ) creep.harvest(target)
+            else targetId = null
+        } else {
+            const amount = Math.min(A.res.qeury(targetId as Id<StorableStructure>, RESOURCE_ENERGY), creep.store.getFreeCapacity(RESOURCE_ENERGY))
+            if ( amount > 0 ) {
+                assertWithMsg( A.res.request({ id: targetId as Id<StorableStructure>, resourceType: RESOURCE_ENERGY, amount }) === OK )
+                assertWithMsg( creep.withdraw(target, RESOURCE_ENERGY, amount) === OK )
+                A.timer.add(Game.time + 1, (targetId, amount) => A.res.signal(targetId, A.res.CAPACITY, amount), [targetId, amount], `${targetId} 资源更新`)
+            } else targetId = null
+        }
+
         return A.proc.OK_STOP_CURRENT
     }
+}
+
+function issueUpgradeProc(roomName: string) {
+    let workerName = null
 
     function gotoController(name: string) {
         const creep = Game.creeps[name]
@@ -51,7 +83,7 @@ function issueUpgradeProc(roomName: string) {
 
         const controller = Game.rooms[roomName].controller
         /** 已经接近 Controller */
-        if ( creep.pos.roomName === roomName && creep.pos.getRangeTo(controller) <= 1 ) return A.proc.OK
+        if ( creep.pos.roomName === roomName && creep.pos.getRangeTo(controller) <= 3 ) return A.proc.OK
 
         creep.travelTo(controller)
         return A.proc.OK_STOP_CURRENT
@@ -73,9 +105,11 @@ function issueUpgradeProc(roomName: string) {
         return A.proc.OK_STOP_CURRENT
     }
 
+    const gotoSource = getEnergy(roomName, () => workerName, name => workerName = name)
+
     return A.proc.createProc([
         () => C.acquire('worker', roomName, name => workerName = name), 
-        [ 'gotoSource', () => gotoSource(workerName) ], 
+        [ 'gotoSource', gotoSource ], 
         () => gotoController(workerName), 
         () => upgradeController(workerName), 
         [ 'JUMP', () => true, 'gotoSource' ]
@@ -84,35 +118,6 @@ function issueUpgradeProc(roomName: string) {
 
 function issueHarvestProc(roomName: string) {
     let workerName = null
-
-    function gotoSource(name: string) {
-        const creep = Game.creeps[name]
-        /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
-            C.cancel(name)
-            workerName = null
-            return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
-        }
-
-        /** 已经装满 Energy */
-        if ( creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0 ) return A.proc.OK
-
-        /** 确认房间位置 */
-        if ( creep.pos.roomName !== roomName ) {
-            creep.moveToRoom(roomName)
-            return A.proc.OK_STOP_CURRENT
-        }
-        
-        /** 移动到 Source 位置 */
-        const source = creep.pos.findClosestByRange(FIND_SOURCES)
-        if ( creep.pos.getRangeTo(source) > 1 ) {
-            creep.travelTo(source)
-            return A.proc.OK_STOP_CURRENT
-        }
-
-        if ( source.energy > 0 ) creep.harvest(source)
-        return A.proc.OK_STOP_CURRENT
-    }
 
     function gotoSpawn(name: string) {
         const creep = Game.creeps[name]
@@ -129,7 +134,7 @@ function issueHarvestProc(roomName: string) {
             return A.proc.OK_STOP_CURRENT
         }
 
-        const spawns = Game.rooms[roomName].find<FIND_STRUCTURES, StructureSpawn>(FIND_STRUCTURES, { filter: { structureType: STRUCTURE_SPAWN } }).filter(s => s.store.getFreeCapacity(RESOURCE_ENERGY) > 0)
+        const spawns = Game.rooms[roomName].find<FIND_STRUCTURES, StructureSpawn | StructureExtension>(FIND_STRUCTURES, { filter: s => (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_EXTENSION) && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 })
 
         if ( spawns.length === 0 ) {
             /** 此时, 本进程无用, 释放资源并休眠 */
@@ -149,9 +154,11 @@ function issueHarvestProc(roomName: string) {
         return A.proc.OK_STOP_CURRENT
     }
 
+    const gotoSource = getEnergy(roomName, () => workerName, name => workerName = name)
+
     const pid = A.proc.createProc([
         () => C.acquire('worker', roomName, name => workerName = name), 
-        [ 'gotoSource', () => gotoSource(workerName) ], 
+        [ 'gotoSource', gotoSource ], 
         () => gotoSpawn(workerName), 
         [ 'JUMP', () => true, 'gotoSource' ]
     ], `${roomName} => Harvest`, true)
@@ -159,77 +166,179 @@ function issueHarvestProc(roomName: string) {
     A.proc.trigger('watch', () => Game.rooms[roomName].energyAvailable < Game.rooms[roomName].energyCapacityAvailable, [ pid ])
 }
 
+function issueBuildProc(roomName: string) {
+    let workerName = null
+    let restart = false
+    let constructionSite: {
+        structureType: StructureConstant;
+        pos: RoomPosition;
+    } = null
+
+    function getConstructionSite() {
+        /** 需要建造的地方不为空时, 不再重复请求 - Creep 消亡后, 进程重启时使用 */
+        if ( constructionSite !== null ) return A.proc.OK
+
+        constructionSite = P.recommend( roomName, restart )
+        restart = false
+        if ( constructionSite === null ) {
+            log(LOG_INFO, `${roomName} 暂无需要建造的建筑`)
+            return A.proc.STOP_SLEEP
+        }
+
+        log(LOG_INFO, `${roomName} 规划的下一个建筑地点为 ${constructionSite.structureType} (${constructionSite.pos})`)
+        /** 判断是否已经存在 */
+        const target = Game.rooms[roomName].lookForAt(LOOK_CONSTRUCTION_SITES, constructionSite.pos).filter(s => s.structureType === constructionSite.structureType)[0]
+        if ( !target )
+            assertWithMsg(Game.rooms[roomName].createConstructionSite(constructionSite.pos, constructionSite.structureType) === OK, `推荐的建筑 ${constructionSite.structureType} (${constructionSite.pos}) 应当一定可建造, 但是不是`)
+        return A.proc.OK_STOP_NEXT
+    }
+
+    function buildConstructionSite(name: string) {
+        const creep = Game.creeps[name]
+        /** 检测到错误, 立即释放资源 */
+        if ( !creep ) {
+            C.cancel(name)
+            workerName = null
+            return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
+        }
+
+        if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) return A.proc.OK
+
+        if ( creep.pos.roomName === roomName && creep.pos.getRangeTo(constructionSite.pos) <= 3 ) {
+            const target = Game.rooms[roomName].lookForAt(LOOK_CONSTRUCTION_SITES, constructionSite.pos)[0]
+            if ( target ) creep.build(target)
+            else {
+                C.release(name)
+                workerName = null
+                constructionSite = null
+                return [ A.proc.OK_STOP_CUSTOM, 'getConstructionSite' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+            }
+        } else creep.travelTo(constructionSite.pos)
+
+        return A.proc.OK_STOP_CURRENT
+    }
+
+    const gotoSource = getEnergy(roomName, () => workerName, name => workerName = name)
+
+    const pid = A.proc.createProc([
+        ['getConstructionSite', () => getConstructionSite()], 
+        () => C.acquire('worker', roomName, name => workerName = name), 
+        ['gotoSource', gotoSource], 
+        () => buildConstructionSite(workerName), 
+        [ 'JUMP', () => true, 'gotoSource' ]
+    ], `${roomName} => Build`)
+
+    const controllerLevelWatcher = {
+        lastValue: Game.rooms[roomName].controller.level, 
+        currentValue: Game.rooms[roomName].controller.level, 
+    };
+    /** 在升级时触发 */
+    (controllerLevelWatcher => A.proc.trigger('watch', () => {
+        controllerLevelWatcher.lastValue = controllerLevelWatcher.currentValue
+        controllerLevelWatcher.currentValue = Game.rooms[roomName].controller.level
+        return restart = controllerLevelWatcher.lastValue !== controllerLevelWatcher.currentValue
+    }, [ pid ]))(controllerLevelWatcher)
+}
+
+function issueRepairProc(roomName: string) {
+    let workerName = null
+    let repairedPos: RoomPosition = null
+
+    function getRepairedPos() {
+        const structure = _.min(Game.rooms[roomName].find(FIND_STRUCTURES, { filter: s => s.hits < s.hitsMax }), s => s.hits / s.hitsMax)
+        if ( !(structure instanceof Structure) ) return A.proc.STOP_SLEEP
+        else {
+            log(LOG_DEBUG, `发现需要修理的建筑 ${structure}`)
+            repairedPos = structure.pos
+        }
+        return A.proc.OK
+    }
+
+    function gotoStructure(name: string) {
+        const creep = Game.creeps[name]
+        /** 检测到错误, 立即释放资源 */
+        if ( !creep ) {
+            C.cancel(name)
+            workerName = null
+            return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
+        }
+
+        if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) {
+            C.release(name)
+            workerName = null
+            return A.proc.OK
+        }
+        
+        if ( creep.pos.roomName === roomName && creep.pos.getRangeTo(repairedPos) <= 3 ) {
+            const structure = _.min(Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, repairedPos).filter(s => s.hits < s.hitsMax), s => s.hits / s.hitsMax)
+            if ( structure instanceof Structure ) creep.repair(structure)
+            else {
+                C.release(name)
+                workerName = null
+                repairedPos = null
+                return [ A.proc.OK_STOP_CUSTOM, 'getRepairedPos' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+            }
+        } else creep.travelTo(repairedPos)
+
+        return A.proc.OK_STOP_CURRENT
+    }
+
+    const gotoSource = getEnergy(roomName, () => workerName, name => workerName = name)
+
+    const pid = A.proc.createProc([
+        ['getRepairedPos', () => getRepairedPos()], 
+        () => C.acquire('worker', roomName, name => workerName = name), 
+        [ 'gotoSource', gotoSource ], 
+        () => gotoStructure(workerName), 
+        [ 'JUMP', () => true, 'getRepairedPos' ]
+    ], `${roomName} => Repair`)
+
+    let lastTriggerTick = Game.time
+    /** Repair 定时触发 */
+    A.proc.trigger('watch', () => {
+        if ( Game.time - lastTriggerTick > RAMPART_DECAY_TIME / 2 ) {
+            lastTriggerTick = Game.time
+            return true
+        } else return false
+    }, [ pid ])
+}
+
 /** AI 注册入口 */
 export function registerAll() {
     /** 建筑规划 */
-    P.register('unit', 'centralSpawn', new Unit([
-        [Unit.STRUCTURE_ANY,    STRUCTURE_ROAD,                         STRUCTURE_ROAD,         STRUCTURE_ROAD,                         STRUCTURE_ROAD,         STRUCTURE_ROAD,                         Unit.STRUCTURE_ANY],
-        [STRUCTURE_ROAD,        STRUCTURE_EXTENSION,                    STRUCTURE_EXTENSION,    [STRUCTURE_SPAWN, STRUCTURE_RAMPART],   STRUCTURE_EXTENSION,    STRUCTURE_EXTENSION,                    STRUCTURE_ROAD],
-        [STRUCTURE_ROAD,        STRUCTURE_EXTENSION,                    Unit.STRUCTURE_ANY,     STRUCTURE_EXTENSION,                    Unit.STRUCTURE_ANY,     STRUCTURE_EXTENSION,                    STRUCTURE_ROAD],
-        [STRUCTURE_ROAD,        STRUCTURE_CONTAINER,                    STRUCTURE_EXTENSION,    STRUCTURE_LINK,                         STRUCTURE_EXTENSION,    STRUCTURE_CONTAINER,                    STRUCTURE_ROAD],
-        [STRUCTURE_ROAD,        [STRUCTURE_SPAWN, STRUCTURE_RAMPART],   Unit.STRUCTURE_ANY,     STRUCTURE_EXTENSION,                    Unit.STRUCTURE_ANY,     [STRUCTURE_SPAWN, STRUCTURE_RAMPART],   STRUCTURE_ROAD],
-        [STRUCTURE_ROAD,        STRUCTURE_EXTENSION,                    STRUCTURE_EXTENSION,    STRUCTURE_EXTENSION,                    STRUCTURE_EXTENSION,    STRUCTURE_EXTENSION,                    STRUCTURE_ROAD],
-        [Unit.STRUCTURE_ANY,    STRUCTURE_ROAD,                         STRUCTURE_ROAD,         STRUCTURE_ROAD,                         STRUCTURE_ROAD,         STRUCTURE_ROAD,                         Unit.STRUCTURE_ANY]
-    ]), { distanceReferencesFrom: [ STRUCTURE_SPAWN ], distanceReferencesTo: [ STRUCTURE_CONTROLLER, 'mineral', 'sources' ] })
-
-    P.register('unit', 'centralTransfer', new Unit([
-        [[STRUCTURE_STORAGE, STRUCTURE_RAMPART],    [STRUCTURE_NUKER, STRUCTURE_RAMPART],   [STRUCTURE_POWER_SPAWN, STRUCTURE_RAMPART]],
-        [[STRUCTURE_TERMINAL, STRUCTURE_RAMPART],   STRUCTURE_ROAD,                         STRUCTURE_EXTENSION],
-        [STRUCTURE_LINK,                            [STRUCTURE_FACTORY, STRUCTURE_RAMPART], STRUCTURE_ROAD]
-    ]), { distanceReferencesFrom: [ STRUCTURE_STORAGE ], distanceReferencesTo: [ STRUCTURE_CONTROLLER, STRUCTURE_SPAWN ] })
-
-    P.register('road', 'centralSpawn => centralTransfer', 'centralSpawn', 'centralTransfer')
-
-    P.register('unit', 'towers', new Unit([ [ [STRUCTURE_TOWER, STRUCTURE_RAMPART] ] ]), { roadRelationship: 'along', distanceReferencesFrom: [ STRUCTURE_TOWER ], distanceReferencesTo: [ STRUCTURE_STORAGE ], amount: 6 })
-
-    P.register('unit', 'extensionUnit', new Unit([
-        [STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_ROAD],
-        [STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION],
-        [STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION],
-        [STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_ROAD, STRUCTURE_EXTENSION],
-        [STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_ROAD]
-    ]), { distanceReferencesFrom: [ STRUCTURE_ROAD ], distanceReferencesTo: [ STRUCTURE_SPAWN, STRUCTURE_STORAGE ], amount: 2 })
-    
-    P.register('road', 'centralSpawn => extensionUnit', 'centralSpawn', 'extensionUnit')
-
-    P.register('unit', 'extensions', new Unit([ [STRUCTURE_EXTENSION] ]), { distanceReferencesFrom: [ STRUCTURE_EXTENSION ], distanceReferencesTo: [ STRUCTURE_SPAWN, STRUCTURE_STORAGE ], roadRelationship: 'along', amount: 12 })
-
-    P.register('unit', 'labUnit', new Unit([
-        [Unit.STRUCTURE_ANY,                    [STRUCTURE_LAB, STRUCTURE_RAMPART],     [STRUCTURE_LAB, STRUCTURE_RAMPART],     STRUCTURE_ROAD],
-        [[STRUCTURE_LAB, STRUCTURE_RAMPART],    [STRUCTURE_LAB, STRUCTURE_RAMPART],     STRUCTURE_ROAD,                         [STRUCTURE_LAB, STRUCTURE_RAMPART]],
-        [[STRUCTURE_LAB, STRUCTURE_RAMPART],    STRUCTURE_ROAD,                         [STRUCTURE_LAB, STRUCTURE_RAMPART],     [STRUCTURE_LAB, STRUCTURE_RAMPART]],
-        [STRUCTURE_ROAD,                        [STRUCTURE_LAB, STRUCTURE_RAMPART],     [STRUCTURE_LAB, STRUCTURE_RAMPART],     Unit.STRUCTURE_ANY]
-    ]), { distanceReferencesFrom: [ STRUCTURE_ROAD ], distanceReferencesTo: [ STRUCTURE_SPAWN ] })
-
-    P.register('road', 'centralSpawn => labUnit', 'centralSpawn', 'labUnit')
-
-    P.register('unit', 'observer', new Unit([ [STRUCTURE_OBSERVER] ]), { distanceReferencesFrom: [ STRUCTURE_OBSERVER ], distanceReferencesTo: [ STRUCTURE_SPAWN ], roadRelationship: 'along'})
-
-    /** @NOTICE 对于第一个房间, `centralSpawn` 的位置需要手工指定 */
-    // (Memory as any)._plan = { 'E55S2': { 'centralSpawn': [ new RoomPosition(8, 23, 'E55S2') ] } }
+    registerCommonConstructions()
+    /** Source Harvest 模块 */
+    registerHarvestSource()
 
     C.design('worker', {
         body: [ WORK, CARRY, MOVE ], 
-        amount: 2, 
+        amount: 4, 
     })
     
     for ( const roomName in Game.rooms ) {
         const room = Game.rooms[roomName]
         if ( !room.controller || !room.controller.my ) continue
-        /** Room-specific 建筑规划 */
+        /** 建筑规划 */
         P.register('road', `${roomName}: centralSpawn => Controller`, 'centralSpawn', room.controller.pos, { range: 1 })
         room.find(FIND_SOURCES).forEach(source => P.register('road', `${roomName}: centralSpawn => Source ${source.id}`, 'centralSpawn', source.pos, { range: 1 }))
         room.find(FIND_MINERALS).forEach(mineral => P.register('road', `${roomName}: centralSpawn => Mineral ${mineral.id}`, 'centralSpawn', mineral.pos, { range: 1 }))
 
         // 房间可视化进程
-        // A.timer.add(Game.time + 1, (roomName, container) => {
-        //     if ( container.cache === null )
-        //         container.cache = P.visualize(roomName)
-        //     else
-        //         new RoomVisual(roomName).import(container.cache)
-        // }, [roomName, { cache: null }], `可视化房间自动规划布局 ${roomName}`, 1)
+        A.timer.add(Game.time + 1, (roomName, container) => {
+            if ( container.cache === null )
+                container.cache = P.visualize(roomName)
+            else
+                new RoomVisual(roomName).import(container.cache)
+        }, [roomName, { cache: null }], `可视化房间自动规划布局 ${roomName}`, 1)
+
+        /** 资源状态输出 */
+        A.timer.add(Game.time + 1, roomName => A.res.print(roomName), [roomName], `输出房间 ${roomName} 资源状态`, 1)
 
         issueUpgradeProc(roomName)
         issueHarvestProc(roomName)
+        issueBuildProc(roomName)
+        issueRepairProc(roomName)
+        /** Source Harvest 模块 */
+        issueHarvestSource(roomName, A.proc.signal.createSignal(0), () => [])
     }
 }

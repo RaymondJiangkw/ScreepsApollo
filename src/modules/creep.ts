@@ -432,7 +432,7 @@ class CreepSpawnModule {
             if ( Game.rooms[roomName].controller && Game.rooms[roomName].controller.my )
                 this.#issueRoomSpawnProc(roomName)
         }
-        A.proc.trigger('after', Creep.prototype, 'claimController', (returnValue: CreepActionReturnCode, target: StructureController) => {
+        A.proc.trigger('after', Creep.prototype, 'claimController', (returnValue: CreepActionReturnCode, creep: Creep, target: StructureController) => {
             if ( returnValue === OK )
                 this.#issueRoomSpawnProc(target.room.name)
         })

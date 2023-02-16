@@ -2,10 +2,8 @@
  * 🛠️ 自动规划模块
  */
 
-import { assertWithMsg, constructArray, log, LOG_DEBUG, LOG_ERR, LOG_INFO } from "@/utils"
-
-const ROOM_HEIGHT = 50
-const ROOM_WIDTH = 50
+import { assertWithMsg, constructArray, convertPosToString, log, LOG_DEBUG, LOG_ERR, LOG_INFO, LOG_PROFILE } from "@/utils"
+import { Apollo as A } from "@/framework/apollo"
 
 const STRUCTURE_ANY     = "any"
 /** 指示当前位置的建筑 */
@@ -14,7 +12,8 @@ type StructureIndicator = StructureConstant | typeof STRUCTURE_ANY
 type StructurePattern = (StructureIndicator | StructureIndicator[])[][]
 type _StructurePattern = StructureIndicator[][][]
 
-type Pos = { x: number, y: number, roomName: string }
+/** 每个二元组是相对于左上角的偏移量 */
+type TagDescription = { [tagName: string]: [number, number][] }
 
 /** 基础建筑单元 (出于效率考虑, 不允许建筑单元之间重叠) */
 export class Unit {
@@ -22,6 +21,8 @@ export class Unit {
     static readonly STRUCTURE_ANY: typeof STRUCTURE_ANY = STRUCTURE_ANY
     #pattern: _StructurePattern
     #structure2Pos: { [ structureType in StructureConstant ]?: {x: number, y: number}[] } = {}
+    #tag2Pos: { [ tagName: string ]: { x: number, y: number }[] } = {}
+    #pos2Tag: { [ pos: string ]: string[] } = {}
     /** 建筑单元高度 */
     height: number
     /** 建筑单元长度 */
@@ -34,10 +35,25 @@ export class Unit {
     getPositionStructures(x: number, y: number): StructureConstant[] {
         return this.#pattern[y][x].filter(v => v !== Unit.STRUCTURE_ANY) as StructureConstant[]
     }
+    getTagPositions(tagName: string, leftTop: Pos): {pos: Pos, structureTypes: StructureConstant[]}[] {
+        if ( !(tagName in this.#tag2Pos) ) return []
+        return this.#tag2Pos[tagName].map( ({x, y}) => ({pos: {x: x + leftTop.x, y: y + leftTop.y, roomName: leftTop.roomName}, structureTypes: this.getPositionStructures(x, y) }) )
+    }
+    getPositionTags(x: number, y: number): string[] {
+        if ( !(`${x},${y}` in this.#pos2Tag) ) return []
+        return this.#pos2Tag[`${x},${y}`]
+    }
     get structureTypes(): StructureConstant[] {
         return Object.keys(this.#structure2Pos) as StructureConstant[]
     }
-    constructor(pattern: StructurePattern) {
+    containedRestrictedStructures(): StructureConstant[] {
+        return this.structureTypes.filter(s => s !== STRUCTURE_ROAD && s !== STRUCTURE_RAMPART && s !== STRUCTURE_WALL)
+    }
+    /**
+     * @param pattern 建筑范式
+     * @param tag 建筑位置命名 - 用于判定某部分是否已经建造好
+     */
+    constructor(pattern: StructurePattern, tag: TagDescription = {}) {
         // 规整 `pattern`
         for ( let j = 0; j < pattern.length; ++j )
             for ( let i = 0; i < pattern[j].length; ++i )
@@ -59,6 +75,18 @@ export class Unit {
                     this.#structure2Pos[indicator].push({ x: i, y: j })
                 } )
             }
+        
+        // 编译 `tag`
+        for ( const tagName in tag ) {
+            if ( !(tagName in this.#tag2Pos) ) this.#tag2Pos[tagName] = []
+            tag[tagName].forEach( offset => {
+                const offsetX = offset[1]
+                const offsetY = offset[0]
+                this.#tag2Pos[tagName].push({ x: offsetX, y: offsetY })
+                if ( !(`${offsetX},${offsetY}` in this.#pos2Tag) ) this.#pos2Tag[`${offsetX},${offsetY}`] = []
+                this.#pos2Tag[`${offsetX},${offsetY}`].push(tagName)
+            })
+        }
     }
 }
 
@@ -80,6 +108,8 @@ interface RoadRegisterOpts {
 
 /** 自动规划模块 */
 class PlanModule {
+    ROOM_HEIGHT: number = 50
+    ROOM_WIDTH: number = 50
     /** 特殊规划单元 - 保护墙 */
     static readonly PROTECT_UNIT: string = 'protect'
     /** 存储规划内容 */
@@ -142,7 +172,7 @@ class PlanModule {
             
             // 更新保护区域
             if ( unitName !== PlanModule.PROTECT_UNIT ) {
-                log(LOG_DEBUG, `为房间 ${roomName} 注册需要保护的区域 (${unitName}): (${pos.x}, ${pos.y}, ${pos.x + unit.width - 1}, ${pos.y + unit.height - 1})`)
+                // log(LOG_DEBUG, `为房间 ${roomName} 注册需要保护的区域 (${unitName}): (${pos.x}, ${pos.y}, ${pos.x + unit.width - 1}, ${pos.y + unit.height - 1})`)
                 this.#getProtectRectangles(roomName).push( {x1: pos.x, y1: pos.y, x2: pos.x + unit.width - 1, y2: pos.y + unit.height - 1} )
             }
         }
@@ -238,15 +268,15 @@ class PlanModule {
     #emptySpaceCache: { [roomName: string]: number[][] } = {}
     #getEmptySpace(roomName: string, x1: number, y1: number, x2: number, y2: number): number {
         const get = (x, y) => {
-            if ( y < 0 || y >= ROOM_HEIGHT || x < 0 || x >= ROOM_WIDTH) return 0
+            if ( y < 0 || y >= this.ROOM_WIDTH || x < 0 || x >= this.ROOM_WIDTH) return 0
             return this.#emptySpaceCache[roomName][x][y]
         }
 
         if ( !(roomName in this.#emptySpaceCache) ) {
-            this.#emptySpaceCache[roomName] = constructArray([ ROOM_WIDTH, ROOM_HEIGHT ], 0)
+            this.#emptySpaceCache[roomName] = constructArray([ this.ROOM_WIDTH, this.ROOM_WIDTH ], 0)
             const terrain = new Room.Terrain(roomName)
-            for ( let y = 0; y < ROOM_HEIGHT; ++y )
-                for ( let x = 0; x < ROOM_WIDTH; ++x )
+            for ( let y = 0; y < this.ROOM_WIDTH; ++y )
+                for ( let x = 0; x < this.ROOM_WIDTH; ++x )
                     this.#emptySpaceCache[roomName][x][y] = get(x - 1, y) + get(x, y - 1) - get(x - 1, y - 1) + ( terrain.get(x, y) === TERRAIN_MASK_WALL? 0 : 1 )
         }
         
@@ -254,7 +284,7 @@ class PlanModule {
     }
     #usedRoomPos: { [roomName: string]: ('free' | 'occupied' | 'road')[][] } = {}
     #getUsedRoomPos(roomName: string) {
-        if ( !(roomName in this.#usedRoomPos) ) this.#usedRoomPos[roomName] = constructArray([ROOM_WIDTH, ROOM_HEIGHT], 'free')
+        if ( !(roomName in this.#usedRoomPos) ) this.#usedRoomPos[roomName] = constructArray([this.ROOM_WIDTH, this.ROOM_WIDTH], 'free')
         return this.#usedRoomPos[roomName]
     }
     /** 可能有重复 - 特别是路径搜索时, 会有路径的复用 */
@@ -269,8 +299,8 @@ class PlanModule {
         const terrain = new Room.Terrain(roomName)
         const costMatrix = new PathFinder.CostMatrix()
         const used = this.#getUsedRoomPos(roomName)
-        for (let x = 0; x < ROOM_WIDTH; ++x)
-            for (let y = 0; y < ROOM_HEIGHT; ++y) {
+        for (let x = 0; x < this.ROOM_WIDTH; ++x)
+            for (let y = 0; y < this.ROOM_WIDTH; ++y) {
                 if ( terrain.get(x, y) === TERRAIN_MASK_WALL ) costMatrix.set(x, y, 0xff)
                 else costMatrix.set(x, y, 2)
 
@@ -307,7 +337,7 @@ class PlanModule {
                     // 省略他人房间
                     if ( Game.rooms[roomName].controller && !Game.rooms[roomName].controller.my && Game.rooms[roomName].controller.owner.username && Game.rooms[roomName].controller.owner.username.length > 0 ) return false
                     if ( Game.rooms[roomName].controller && Game.rooms[roomName].controller.my ) {
-                        this.#planRoom(roomName)
+                        this.#planRoom(roomName, false)
                         return this.#getRoomCostCallback(roomName)
                     }
 
@@ -322,38 +352,43 @@ class PlanModule {
             return path
         }
     }
+    #room2CenterType: { [roomName: string]: STRUCTURE_SPAWN | STRUCTURE_CONTROLLER } = {}
     #room2DistanceFromCenter: { [roomName: string]: number[][] } = {}
     /** 根据 BFS, 以 Spawn 为中心, 只考虑地形估计距离 */
     #estimateInRoomDistance(posU: Pos, posV: Pos) {
         assertWithMsg( posU.roomName === posV.roomName, `使用房间内距离估计函数计算 ${posU} 到 ${posV} 距离时, 发现房间不相同` )
         // 尝试计算距离矩阵
-        if ( !(posU.roomName in this.#room2DistanceFromCenter) ) {
-            // 当且仅当 Spawn 存在时, 再计算
-            if ( Game.rooms[posU.roomName] ) {
-                const spawns = Game.rooms[posU.roomName].find<FIND_STRUCTURES, StructureSpawn>(FIND_STRUCTURES, { filter: { structureType: STRUCTURE_SPAWN } })
-                if ( spawns.length > 0 ) {
-                    const centerPos = spawns[0].pos
-                    const terrain = new Room.Terrain(posU.roomName)
-                    this.#room2DistanceFromCenter[posU.roomName] = constructArray([50, 50], -1)
-                    const dx = [-1, -1, -1, 0, 0, 1, 1, 1]
-                    const dy = [-1, 0, 1, -1, 1, -1, 0, 1]
-                    const dlen = dx.length
-                    const Q: { x: number, y: number, dist: number }[] = []
-                    Q.push({ x: centerPos.x, y: centerPos.y, dist: 0 })
-                    this.#room2DistanceFromCenter[posU.roomName][centerPos.x][centerPos.y] = 0
-                    while ( Q.length > 0 ) {
-                        const front = Q.shift()
-                        for ( let i = 0; i < dlen; ++i ) {
-                            if ( front.x + dx[i] < 0 || front.x + dx[i] >= ROOM_WIDTH || front.y + dy[i] < 0 || front.y + dy[i] >= ROOM_HEIGHT ) continue
-                            if ( this.#room2DistanceFromCenter[posU.roomName][front.x + dx[i]][front.y + dy[i]] !== -1 ) continue
+        if ( !( posU.roomName in this.#room2DistanceFromCenter && this.#room2CenterType[posU.roomName] === STRUCTURE_SPAWN ) ) {
+            const controllerExist = Game.rooms[posU.roomName] && Game.rooms[posU.roomName].controller
+            const spawnExist = this.#getRoomStructure2Pos(posU.roomName, STRUCTURE_SPAWN).length > 0
+            if ( (!(posU.roomName in this.#room2DistanceFromCenter) && (controllerExist || spawnExist) ) || 
+                 (this.#room2CenterType[posU.roomName] === STRUCTURE_CONTROLLER && spawnExist) ) {
+                if ( spawnExist )
+                    this.#room2CenterType[posU.roomName] = STRUCTURE_SPAWN
+                else if ( controllerExist )
+                    this.#room2CenterType[posU.roomName] = STRUCTURE_CONTROLLER
+                
+                const centerPos = spawnExist ? this.#getRoomStructure2Pos(posU.roomName, STRUCTURE_SPAWN)[0] : Game.rooms[posU.roomName].controller.pos
+                const terrain = new Room.Terrain(posU.roomName)
+                this.#room2DistanceFromCenter[posU.roomName] = constructArray([50, 50], -1)
+                const dx = [-1, -1, -1, 0, 0, 1, 1, 1]
+                const dy = [-1, 0, 1, -1, 1, -1, 0, 1]
+                const dlen = dx.length
+                const Q: { x: number, y: number, dist: number }[] = []
+                Q.push({ x: centerPos.x, y: centerPos.y, dist: 0 })
+                this.#room2DistanceFromCenter[posU.roomName][centerPos.x][centerPos.y] = 0
+                while ( Q.length > 0 ) {
+                    const front = Q.shift()
+                    for ( let i = 0; i < dlen; ++i ) {
+                        if ( front.x + dx[i] < 0 || front.x + dx[i] >= this.ROOM_WIDTH || front.y + dy[i] < 0 || front.y + dy[i] >= this.ROOM_WIDTH ) continue
+                        if ( this.#room2DistanceFromCenter[posU.roomName][front.x + dx[i]][front.y + dy[i]] !== -1 ) continue
 
-                            if ( terrain.get(front.x + dx[i], front.y + dy[i]) !== TERRAIN_MASK_WALL ) {
-                                this.#room2DistanceFromCenter[posU.roomName][front.x + dx[i]][front.y + dy[i]] = front.dist + 1
-                                Q.push({ x: front.x + dx[i], y: front.y + dy[i], dist: front.dist + 1 })
-                            }
+                        if ( terrain.get(front.x + dx[i], front.y + dy[i]) !== TERRAIN_MASK_WALL ) {
+                            this.#room2DistanceFromCenter[posU.roomName][front.x + dx[i]][front.y + dy[i]] = front.dist + 1
+                            Q.push({ x: front.x + dx[i], y: front.y + dy[i], dist: front.dist + 1 })
                         }
                     }
-                } else log(LOG_DEBUG, `估算房间 ${posU.roomName} 内两点距离时, 发现不存在 Spawn`)
+                }
             }
         }
 
@@ -377,25 +412,27 @@ class PlanModule {
         return (Memory as any)._impossibleRoad
     }
     #havePlannedRoom: string[] = []
+    #haveRegisteredRoom: string[] = []
     /** 规划房间 - 连接房间的路径应假定房间已经规划完成 @returns 是否规划成功 */
-    #planRoom(roomName: string): boolean {
+    #planRoom(roomName: string, allowSkip: boolean = true): boolean {
         if ( _.includes(this.#getMismatchRoom(), roomName) ) return false
-        if ( _.includes(this.#havePlannedRoom, roomName) ) return true
+        if ( _.includes(this.#havePlannedRoom, roomName) && allowSkip ) return true
+        if ( _.includes(this.#haveRegisteredRoom, roomName) ) return true
 
         // 快速路径 (校验已经完成所有的规划)
-        let flag = true
+        let alreadyPlanned = true
         for ( const { token, name, specializedToRoom } of this.#planOrder ) {
             if ( typeof specializedToRoom === 'string' && specializedToRoom !== roomName ) continue
             if ( (token === 'unit' && this.#getUnitPos(roomName, name) !== null) ||
                 (token === 'road' && this.#getRoads(roomName, name) !== null) ) continue
             else {
-                flag = false
+                alreadyPlanned = false
                 break
             }
         }
-        if ( flag ) {
-            this.#havePlannedRoom.push(roomName)
-            return true
+        if ( alreadyPlanned ) {
+            if ( !_.includes(this.#havePlannedRoom, roomName) ) this.#havePlannedRoom.push(roomName)
+            if ( allowSkip ) return true
         }
 
         // 注册已经完成的部分
@@ -418,8 +455,8 @@ class PlanModule {
                 log(LOG_INFO, `正在为房间 ${roomName} 规划建筑单元 ${name} ...`)
                 let candidatePos: Pos[] = []
                 // 枚举左上位置
-                for (let x = 0 + PlanModule.#MARGIN; x < ROOM_WIDTH - PlanModule.#MARGIN - unit.width; ++x)
-                    for (let y = 0 + PlanModule.#MARGIN; y < ROOM_HEIGHT - PlanModule.#MARGIN - unit.height; ++y) {
+                for (let x = 0 + PlanModule.#MARGIN; x < this.ROOM_WIDTH - PlanModule.#MARGIN - unit.width; ++x)
+                    for (let y = 0 + PlanModule.#MARGIN; y < this.ROOM_WIDTH - PlanModule.#MARGIN - unit.height; ++y) {
                         // 满足空间要求
                         const freeArea = this.#getEmptySpace(roomName, x, y, x + unit.width - 1, y + unit.height - 1)
                         if ( freeArea !== unit.width * unit.height ) continue
@@ -446,7 +483,7 @@ class PlanModule {
                                     if ( dx === 0 && dy === 0 ) continue
                                     const xx = x + dx
                                     const yy = y + dy
-                                    if ( xx < 0 || yy < 0 || xx >= ROOM_WIDTH || yy >= ROOM_HEIGHT ) continue
+                                    if ( xx < 0 || yy < 0 || xx >= this.ROOM_WIDTH || yy >= this.ROOM_WIDTH ) continue
                                     
                                     if ( this.#getUsedRoomPos(roomName)[xx][yy] === "road" ) {
                                         flag = true
@@ -560,25 +597,31 @@ class PlanModule {
                 this.#setRoads(roomName, name, paths)
             }
         }
-        // 特殊情况: 保护墙规划
-        const extend = (rect: Rectangle, range = 3) => {
-            rect.x1 = Math.max(1, rect.x1 - range);
-            rect.y1 = Math.max(1, rect.y1 - range);
-            rect.x2 = Math.min(48, rect.x2 + range);
-            rect.y2 = Math.min(48, rect.y2 + range);
-            return rect
-        }
 
-        const ramparts = getCutTiles(roomName, _.uniq(this.#getProtectRectangles(roomName), e => `${e.x1},${e.y1},${e.x2},${e.y2}`).map(r => extend(r)), true, Infinity, false)
+        if ( !alreadyPlanned ) {
+            // 特殊情况: 保护墙规划
+            const extend = (rect: Rectangle, range = 3) => {
+                rect.x1 = Math.max(1, rect.x1 - range);
+                rect.y1 = Math.max(1, rect.y1 - range);
+                rect.x2 = Math.min(48, rect.x2 + range);
+                rect.y2 = Math.min(48, rect.y2 + range);
+                return rect
+            }
 
-        this.#setUnitPos(roomName, PlanModule.PROTECT_UNIT, ramparts)
-        this.#havePlannedRoom.push(roomName)
+            const ramparts = getCutTiles(roomName, _.uniq(this.#getProtectRectangles(roomName), e => `${e.x1},${e.y1},${e.x2},${e.y2}`).map(r => extend(r)), true, Infinity, false)
+
+            this.#setUnitPos(roomName, PlanModule.PROTECT_UNIT, ramparts)
+            this.#havePlannedRoom.push(roomName)
+        } else this.#setUnitPos(roomName, PlanModule.PROTECT_UNIT, this.#getUnitPos(roomName, PlanModule.PROTECT_UNIT), true)
+
+        if ( !_.includes(this.#haveRegisteredRoom, roomName) ) this.#haveRegisteredRoom.push(roomName)
+
         return true
     }
     /** 规划某房间的建筑单位或连接路径 */
-    plan(roomName: string, token: 'unit', name: string): { structures: { [structureType in StructureConstant]? : RoomPosition[] }, leftTops: RoomPosition[] } | null
-    plan(roomName: string, token: 'road', name: string): { [STRUCTURE_ROAD]: RoomPosition[] } | null
-    plan(roadName: string): { [STRUCTURE_ROAD]: RoomPosition[] } | null
+    plan(roomName: string, token: 'unit', name: string): { structures: { [structureType in StructureConstant]? : {pos: RoomPosition, tag: string[]}[] }, leftTops: RoomPosition[] } | null
+    plan(roomName: string, token: 'road', name: string): { [STRUCTURE_ROAD]: {pos: RoomPosition, tag: string[]}[] } | null
+    plan(roadName: string): { [STRUCTURE_ROAD]: {pos: RoomPosition, tag: string[]}[] } | null
     plan(arg1, arg2?, arg3?) {
         if ( arg2 !== undefined && arg3 !== undefined ) {
             const roomName: string = arg1
@@ -591,11 +634,11 @@ class PlanModule {
                         return null
                 const unit = this.#unitDict[name].unit
                 const unitPos = this.#getUnitPos(roomName, name)
-                const ret: { [structureType in StructureConstant]? : RoomPosition[] } = {}
+                const ret: { [structureType in StructureConstant]? : {pos: RoomPosition, tag: string[]}[] } = {}
                 unitPos.forEach(pos => {
                     for ( const structureType of unit.structureTypes ) {
                         if ( !(structureType in ret) ) ret[structureType] = []
-                        ret[structureType].push(...unit.getStructurePositions(structureType, pos).map(p => new RoomPosition(p.x, p.y, p.roomName)))
+                        ret[structureType].push(...unit.getStructurePositions(structureType, pos).map(p => ({pos: new RoomPosition(p.x, p.y, p.roomName), tag: unit.getPositionTags(p.x - pos.x, p.y - pos.y)})))
                     }
                 })
                 return { structures: ret, leftTops: unitPos.map(p => new RoomPosition(p.x, p.y, p.roomName)) }
@@ -603,7 +646,7 @@ class PlanModule {
                 if ( this.#getRoads(roomName, name) === null )
                     if ( !this.#planRoom(roomName) )
                         return null
-                return { [STRUCTURE_ROAD]: this.#getRoads(roomName, name).map(p => new RoomPosition(p.x, p.y, p.roomName)) }
+                return { [STRUCTURE_ROAD]: this.#getRoads(roomName, name).map(p => ({pos: new RoomPosition(p.x, p.y, p.roomName), tag: []})) }
             }
         } else {
             const roadName: string = arg1
@@ -613,12 +656,6 @@ class PlanModule {
             assertWithMsg( cross, `只有当连接不同房间内两个具体位置的路径时, 才可以直接用路径名称进行指定规划, 但是路径 ${roadName} 并不满足要求` )
             
             if ( this.#getRoads(roadName) === null ) {
-                // 该路径规划应在房间规划之后
-                const roomNameU = (unitNameUorPosU as RoomPosition).roomName
-                const roomNameV = (unitNameVorPosV as RoomPosition).roomName
-                if (Game.rooms[roomNameU] && Game.rooms[roomNameU].controller && Game.rooms[roomNameU].controller.my) this.#planRoom(roomNameU)
-                if (Game.rooms[roomNameV] && Game.rooms[roomNameV].controller && Game.rooms[roomNameV].controller.my) this.#planRoom(roomNameV)
-
                 const path = this.#searchRoomRoad(unitNameUorPosU as RoomPosition, unitNameVorPosV as RoomPosition, opts)
                 if ( path === null ) {
                     this.#getImpossibleRoad().push(roadName)
@@ -628,16 +665,26 @@ class PlanModule {
                 this.#setRoads(roadName, path)
             }
 
-            return { [STRUCTURE_ROAD]: this.#getRoads(roadName).map(p => new RoomPosition(p.x, p.y, p.roomName)) }
+            return { [STRUCTURE_ROAD]: this.#getRoads(roadName).map(p => ({pos: new RoomPosition(p.x, p.y, p.roomName), tag: []})) }
         }
     }
     /** 判定位置是否 已有/规划 了建筑 (允许道路) - 可用于一些不利用自动规划模块的建筑规划 */
-    isAvailable(pos: RoomPosition): boolean {
-        return this.#getUsedRoomPos(pos.roomName)[pos.x][pos.y] !== 'occupied'
+    isAvailable(pos: Pos, opts: { onRoad?: boolean, offRoad?: boolean } = {}): boolean {
+        _.defaults(opts, { onRoad: false, offRoad: false })
+        assertWithMsg( !opts.onRoad || !opts.offRoad, `检查位置 ${pos.roomName} (${pos.x}, ${pos.y}) 时 'onRoad' 和 'offRoad' 不可同时为真` )
+        this.#planRoom(pos.roomName, false)
+        if ( !opts.onRoad && !opts.offRoad )
+            return this.#getUsedRoomPos(pos.roomName)[pos.x][pos.y] !== 'occupied'
+        else if ( opts.onRoad && !opts.offRoad )
+            return this.#getUsedRoomPos(pos.roomName)[pos.x][pos.y] === 'road'
+        else if ( !opts.onRoad && opts.offRoad )
+            return this.#getUsedRoomPos(pos.roomName)[pos.x][pos.y] === 'free'
     }
     /** 可视化 - 会自动完成规划 */
     visualize(roomName: string) {
-        this.#planRoom(roomName)
+        const startTime = Game.cpu.getUsed()
+        this.#planRoom(roomName, false)
+        log(LOG_PROFILE, `计算可视化 ${roomName} 房间消耗 ${(Game.cpu.getUsed() - startTime).toFixed(2)}`)
         if ( !(roomName in this.#roomStructure2Pos) ) return
         const visual = new RoomVisual(roomName)
         for ( const structureType in this.#roomStructure2Pos[roomName] ) {
@@ -651,19 +698,23 @@ class PlanModule {
                     opacity: 1.0, 
                 })
             } else if ( structureType === STRUCTURE_EXTENSION ) {
-                visFunc = (p: Pos) => visual.text('🟡', p.x, p.y)
+                visFunc = (p: Pos) => visual.circle(p.x, p.y, {
+                    fill: 'yellow', 
+                    radius: 0.5, 
+                    opacity: 0.5, 
+                })
             } else if ( structureType === STRUCTURE_ROAD ) {
                 visFunc = (p: Pos) => visual.circle(p.x, p.y, {
                     fill: 'gray', 
                     radius: 0.5, 
-                    opacity: 0.5, 
+                    opacity: 0.25, 
                 })
             } else if ( structureType === STRUCTURE_WALL ) {
                 visFunc = (p: Pos) => visual.text('🧱', p.x, p.y)
             } else if ( structureType === STRUCTURE_RAMPART ) {
                 visFunc = (p: Pos) => visual.circle(p.x, p.y, {
                     fill: 'green', 
-                    opacity: 0.5, 
+                    opacity: 0.25, 
                     radius: 0.5, 
                 })
             } else if ( structureType === STRUCTURE_LINK ) {
@@ -698,8 +749,204 @@ class PlanModule {
         }
         return visual.export()
     }
+    /** 建造次序 (优先级) */
+    #BUILD_PRIORITY: StructureConstant[] = [
+        STRUCTURE_TOWER, 
+        STRUCTURE_SPAWN, 
+        STRUCTURE_EXTENSION, 
+        STRUCTURE_LINK, 
+        STRUCTURE_CONTAINER, 
+        STRUCTURE_RAMPART, 
+        STRUCTURE_WALL, 
+        STRUCTURE_STORAGE, 
+        STRUCTURE_TERMINAL, 
+        STRUCTURE_LAB, 
+        STRUCTURE_FACTORY, 
+        STRUCTURE_OBSERVER, 
+        STRUCTURE_POWER_SPAWN, 
+        STRUCTURE_NUKER, 
+        STRUCTURE_ROAD
+    ]
+    #getStrictlyBuiltRoom(): string[] {
+        if ( !('_strictlyBuiltRoom' in Memory) ) (Memory as any)._strictlyBuiltRoom = []
+        return (Memory as any)._strictlyBuiltRoom
+    }
+    #room2currentBuildPointer: { [roomName: string]: number } = {}
+    /** 对于某些由于 Controller 等级不够, 予以跳过除泛用建筑外的单元 */
+    #room2skipUnit: { [roomName: string]: string[] } = {}
+    #room2checkedSkipUnit: { [roomName: string]: { [unitName: string]: boolean } } = {}
+    #constructionSite2Info: { [posStr: string]: { pos: Pos, structureType: StructureConstant, unitName: string, tag: string[] } } = {}
+    /** 
+     * 推荐某房间的下一个建造位置 (不考虑正在筑造的建筑)
+     * @param roomName 房间名称
+     * @param restart 是否从头开始重新规划 - 通常在规划发生改变, 控制器升级, 有建筑被破坏时需要考虑
+     */
+    recommend( roomName: string, restart: boolean = false ): { structureType: StructureConstant, pos: RoomPosition } | null {
+        if ( !this.#planRoom(roomName) ) return null
+        if ( !(roomName in Game.rooms) ) return null
+        if ( restart || !(roomName in this.#room2currentBuildPointer) ) {
+            this.#room2currentBuildPointer[roomName] = 0
+            this.#room2skipUnit[roomName] = []
+            this.#room2checkedSkipUnit[roomName] = {}
+        }
+        if ( restart ) _.pull(this.#getStrictlyBuiltRoom(), roomName)
+        else if ( _.includes(this.#getStrictlyBuiltRoom(), roomName) ) return null
+
+        while ( this.#room2currentBuildPointer[roomName] < this.#planOrder.length ) {
+            const { token, name, specializedToRoom } = this.#planOrder[ this.#room2currentBuildPointer[roomName] ]
+            // 跳过针对其他房间的规划
+            if ( typeof specializedToRoom === 'string' && specializedToRoom !== roomName ) {
+                ++this.#room2currentBuildPointer[roomName]
+                continue
+            }
+            
+            if ( token === 'unit' ) {
+                const constructionSites = this.plan(roomName, token, name)
+                const { unit } = this.#unitDict[name]
+                const structureTypeAmounts = _.countBy(Game.rooms[roomName].find(FIND_STRUCTURES).map(s => s.structureType))
+                // 判定是否有实质性建筑已经被建造或可以被建造
+                // 对于多件的建筑单元 (amount > 0), 只要有一个建筑单元满足条件, 即建造所有的路径
+                if ( !(name in this.#room2checkedSkipUnit[roomName]) && unit.containedRestrictedStructures().length > 0 ) {
+                    let flag = false
+
+                    for ( const structureType of unit.containedRestrictedStructures() ) {
+                        if ( (structureTypeAmounts[structureType] || 0) < CONTROLLER_STRUCTURES[structureType][Game.rooms[roomName].controller.level] ) {
+                            flag = true
+                            break
+                        }
+                        
+                        for ( const pos of constructionSites.structures[structureType] )
+                            if ( Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, pos).map(s => s.structureType).includes(structureType) ) {
+                                flag = true
+                                break
+                            }
+                        if ( flag ) break
+                    }
+
+                    this.#room2checkedSkipUnit[roomName][name] = true
+
+                    if ( !flag ) {
+                        log(LOG_DEBUG, `房间 ${roomName} 跳过考虑建筑单元 ${name}`)
+                        ++this.#room2currentBuildPointer[roomName]
+                        continue
+                    }
+                }
+                for ( const structureType of this.#BUILD_PRIORITY ) {
+                    if ( !(structureType in constructionSites.structures) ) continue
+                    for ( const {pos, tag} of constructionSites.structures[structureType] ) {
+                        if ( !Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, pos).map(s => s.structureType).includes(structureType) && (structureTypeAmounts[structureType] || 0) < CONTROLLER_STRUCTURES[structureType][Game.rooms[roomName].controller.level] ) {
+                            if ( !(convertPosToString(pos) in this.#constructionSite2Info) ) this.#constructionSite2Info[convertPosToString(pos)] = { pos, unitName: name, tag, structureType }
+                            return { structureType, pos }
+                        }
+                    }
+                }
+            } else if ( token === 'road' ) {
+                const constructionSites = this.plan(roomName, token, name)
+                const { unitNameUorPosU, unitNameVorPosV } = this.#roadDict[name]
+                // 跳过有 建筑单元 尚未能完成建造的路径
+                if ( typeof unitNameUorPosU === 'string' && _.includes(this.#room2skipUnit[roomName], unitNameUorPosU) ) {
+                    ++this.#room2currentBuildPointer[roomName]
+                    continue
+                }
+                if ( typeof unitNameVorPosV === 'string' && _.includes(this.#room2skipUnit[roomName], unitNameVorPosV) ) {
+                    ++this.#room2currentBuildPointer[roomName]
+                    continue
+                }
+                for ( const { pos } of constructionSites[STRUCTURE_ROAD] )
+                    if ( !Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, pos).map(s => s.structureType).includes(STRUCTURE_ROAD) )
+                        return { structureType: STRUCTURE_ROAD, pos }
+            }
+            ++this.#room2currentBuildPointer[roomName]
+        }
+
+        // 此时: this.#room2currentBuildPointer[roomName] >= this.#planOrder.length
+        if ( this.#room2skipUnit[roomName].length === 0 )
+            this.#getStrictlyBuiltRoom().push(roomName)
+        return null
+    }
+    #room2UnitTagSignal: { [roomName: string]: { [unitName: string]: { [tagName: string]: string } } } = {}
+    #updateUnitTagSignal(signalId: string, roomName: string, unitName: string, tagName: string) {
+        /** 已经完成, 则无需更新 */
+        if ( A.proc.signal.getValue(signalId) === 1 ) return
+        const { unit } = this.#unitDict[unitName]
+        const leftTops = this.plan(roomName, 'unit', unitName).leftTops
+        let flag = false
+        for ( const leftTop of leftTops ) {
+            const requirements = unit.getTagPositions(tagName, leftTop)
+            let anyFail = false
+            for ( const { pos, structureTypes } of requirements ) {
+                const currentStructures = Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, new RoomPosition(pos.x, pos.y, roomName)).map(s => s.structureType)
+                if ( structureTypes.length !== _.intersection(structureTypes, currentStructures).length ) {
+                    anyFail = true
+                    break
+                }
+            }
+            if ( !anyFail ) {
+                flag = true
+                break
+            }
+        }
+        if ( flag ) A.proc.signal.Ssignal({ signalId, request: 1 })
+    }
+    #getRoom2UnitTagSignal(roomName: string, unitName: string, tagName: string): string {
+        assertWithMsg( this.plan(roomName, 'unit', unitName) !== null, `${roomName} 的建筑单元 ${unitName} 规划在获取是否完成信号量时, 需要一定规划成功` )
+        assertWithMsg( Game.rooms[roomName] ? true : false, `获取 ${roomName} 建筑单元 ${unitName} 规划是否完成信号量时, 一定需要有视野` )
+        if ( !(roomName in this.#room2UnitTagSignal) ) this.#room2UnitTagSignal[roomName] = {}
+        if ( !(unitName in this.#room2UnitTagSignal[roomName]) ) this.#room2UnitTagSignal[roomName][unitName] = {}
+
+        if ( !(tagName in this.#room2UnitTagSignal[roomName][unitName]) ) {
+            this.#room2UnitTagSignal[roomName][unitName][tagName] = A.proc.signal.createSignal(0)
+            this.#updateUnitTagSignal(this.#room2UnitTagSignal[roomName][unitName][tagName], roomName, unitName, tagName)
+        }
+        return this.#room2UnitTagSignal[roomName][unitName][tagName]
+    }
+    /**
+     * @atom 判定房间 `roomName` 中建筑单元 `unitName` 的标签 `tagName` 位置是否已经建造完成
+     * 在多数量建筑单元情况下, 默认是完成一个建筑单元中的要求, 即满足条件
+     * 注意: 只有通过 `recommend` 方法得到的建造位置, 才会自动检测建筑是否完成
+     */
+    exist(roomName: string, unitName: string, tagName: string) {
+        return A.proc.signal.Swait({ signalId: this.#getRoom2UnitTagSignal(roomName, unitName, tagName), lowerbound: 1, request: 0 })
+    }
     constructor() {
         this.register('unit', PlanModule.PROTECT_UNIT, new Unit([ [STRUCTURE_RAMPART] ]))
+        /** 完成建造后, 注册完成的建筑, 更新相关信号量 */
+        A.proc.trigger('after', Creep.prototype, 'build', (returnValue, creep: Creep, target: ConstructionSite) => {
+            if ( returnValue === OK && convertPosToString(target.pos) in this.#constructionSite2Info ) {
+                // 从 https://github.com/screeps/engine/blob/master/src/processor/intents/creeps/build.js 中复制而来
+                const buildPower = _.filter(creep.body, i => i.hits > 0 && i.type == WORK).length * BUILD_POWER || 0
+                const buildRemaining = target.progressTotal - target.progress
+                const buildEffect = Math.min(buildPower, buildRemaining, creep.store.energy)
+                let boostedParts = _.map(creep.body, i => {
+                    if(i.type == WORK && i.boost && 'build' in BOOSTS[WORK][i.boost] && BOOSTS[WORK][i.boost]['build'] > 0)
+                        return (BOOSTS[WORK][i.boost]['build']-1) * BUILD_POWER
+                    return 0
+                })
+
+                boostedParts.sort((a,b) => b - a)
+                boostedParts = boostedParts.slice(0, buildEffect)
+
+                const boostedEffect = Math.min(Math.floor(buildEffect + _.sum(boostedParts)), buildRemaining)
+
+                if ( target.progress + boostedEffect >= target.progressTotal ) {
+                    // 注册新建筑
+                    A.timer.add(Game.time + 1, pos => {
+                        const info = this.#constructionSite2Info[convertPosToString(pos)]
+                        if ( info.tag.length === 0 ) return
+                        // 校验建筑确实存在
+                        assertWithMsg( Game.rooms[info.pos.roomName]? true : false )
+                        const structure = Game.rooms[info.pos.roomName].lookForAt(LOOK_STRUCTURES, new RoomPosition(info.pos.x, info.pos.y, info.pos.roomName)).filter(s => s.structureType === info.structureType)[0]
+                        if ( !structure )
+                            log(LOG_ERR, `期望在 ${convertPosToString(info.pos)} 找到建筑 ${info.structureType}, 但是没有找到`)
+                        else {
+                            // 更新相关信号量
+                            for ( const t of info.tag )
+                                this.#updateUnitTagSignal(this.#getRoom2UnitTagSignal(info.pos.roomName, info.unitName, t), info.pos.roomName, info.unitName, t)
+                        }
+                    }, [ target.pos ], `注册即将完成的建筑 ${target.id} (${target.pos}, ${target.structureType})`)
+                }
+            }
+        })
     }
 }
 
