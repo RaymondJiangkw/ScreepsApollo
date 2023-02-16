@@ -390,6 +390,7 @@ class ProcessModule {
         assertWithMsg(this.#lastTick === -1 || this.#lastTick !== Game.time, `进程模块在 ${Game.time} 被重复调用 tick 函数`)
         /** 监视器执行 */
         log(LOG_INFO, `开始运行监视, 监视列表当前大小为 ${this.#watchList.length} ...`)
+        const startCpuTime = Game.cpu.getUsed()
         for ( const watchElement of this.#watchList ) {
             if ( watchElement.lastTick === Game.time )
                 continue
@@ -419,6 +420,7 @@ class ProcessModule {
                 }
             }
         }
+        log(LOG_PROFILE, `监视消耗 ${(Game.cpu.getUsed() - startCpuTime).toFixed(2)}`)
 
         /** 进程执行 */
         log(LOG_INFO, `开始运行进程, 进程池当前大小为 ${this.#processIdReadyQueue.length} ...`)

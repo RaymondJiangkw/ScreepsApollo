@@ -4,6 +4,7 @@
 
 import { assertWithMsg, constructArray, convertPosToString, log, LOG_DEBUG, LOG_ERR, LOG_INFO, LOG_PROFILE } from "@/utils"
 import { Apollo as A } from "@/framework/apollo"
+import { deleteStructureMemory, getStructureMemory } from "./structureMemory"
 
 const STRUCTURE_ANY     = "any"
 /** 指示当前位置的建筑 */
@@ -431,7 +432,10 @@ class PlanModule {
             }
         }
         if ( alreadyPlanned ) {
-            if ( !_.includes(this.#havePlannedRoom, roomName) ) this.#havePlannedRoom.push(roomName)
+            if ( !_.includes(this.#havePlannedRoom, roomName) ) {
+                this.#havePlannedRoom.push(roomName)
+                this.#issueRoomStructureDestroyedWatcher(roomName)
+            }
             if ( allowSkip ) return true
         }
 
@@ -612,6 +616,7 @@ class PlanModule {
 
             this.#setUnitPos(roomName, PlanModule.PROTECT_UNIT, ramparts)
             this.#havePlannedRoom.push(roomName)
+            this.#issueRoomStructureDestroyedWatcher(roomName)
         } else this.#setUnitPos(roomName, PlanModule.PROTECT_UNIT, this.#getUnitPos(roomName, PlanModule.PROTECT_UNIT), true)
 
         if ( !_.includes(this.#haveRegisteredRoom, roomName) ) this.#haveRegisteredRoom.push(roomName)
@@ -865,28 +870,53 @@ class PlanModule {
         return null
     }
     #room2UnitTagSignal: { [roomName: string]: { [unitName: string]: { [tagName: string]: string } } } = {}
-    #updateUnitTagSignal(signalId: string, roomName: string, unitName: string, tagName: string) {
-        /** 已经完成, 则无需更新 */
-        if ( A.proc.signal.getValue(signalId) === 1 ) return
-        const { unit } = this.#unitDict[unitName]
-        const leftTops = this.plan(roomName, 'unit', unitName).leftTops
-        let flag = false
-        for ( const leftTop of leftTops ) {
-            const requirements = unit.getTagPositions(tagName, leftTop)
-            let anyFail = false
-            for ( const { pos, structureTypes } of requirements ) {
-                const currentStructures = Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, new RoomPosition(pos.x, pos.y, roomName)).map(s => s.structureType)
-                if ( structureTypes.length !== _.intersection(structureTypes, currentStructures).length ) {
-                    anyFail = true
+    #updateUnitTagSignal(signalId: string, roomName: string, unitName: string, tagName: string, testExistOrDestroyed: 'exist' | 'destroyed') {
+        if ( testExistOrDestroyed === 'exist' ) {
+            /** 已经完成, 则无需更新 */
+            if ( A.proc.signal.getValue(signalId) === 1 ) return
+            const { unit } = this.#unitDict[unitName]
+            const leftTops = this.plan(roomName, 'unit', unitName).leftTops
+            let flag = false
+            for ( const leftTop of leftTops ) {
+                const requirements = unit.getTagPositions(tagName, leftTop)
+                let anyFail = false
+                for ( const { pos, structureTypes } of requirements ) {
+                    const currentStructures = Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, new RoomPosition(pos.x, pos.y, roomName)).map(s => s.structureType)
+                    if ( structureTypes.length !== _.intersection(structureTypes, currentStructures).length ) {
+                        anyFail = true
+                        break
+                    }
+                }
+                if ( !anyFail ) {
+                    flag = true
                     break
                 }
             }
-            if ( !anyFail ) {
-                flag = true
-                break
+            if ( flag ) A.proc.signal.Ssignal({ signalId, request: 1 })
+        } else if ( testExistOrDestroyed === 'destroyed' ) {
+            /** 尚未完成, 则无需更新 */
+            if ( A.proc.signal.getValue(signalId) === 0 ) return
+            // 一处摧毁, 可能其他处仍然满足
+            const { unit } = this.#unitDict[unitName]
+            const leftTops = this.plan(roomName, 'unit', unitName).leftTops
+            let flag = false
+            for ( const leftTop of leftTops ) {
+                const requirements = unit.getTagPositions(tagName, leftTop)
+                let anyFail = false
+                for ( const { pos, structureTypes } of requirements ) {
+                    const currentStructures = Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, new RoomPosition(pos.x, pos.y, roomName)).map(s => s.structureType)
+                    if ( structureTypes.length !== _.intersection(structureTypes, currentStructures).length ) {
+                        anyFail = true
+                        break
+                    }
+                }
+                if ( !anyFail ) {
+                    flag = true
+                    break
+                }
             }
+            if ( !flag ) assertWithMsg(A.proc.signal.Swait({ signalId, lowerbound: 1, request: 1 }) === A.proc.OK)
         }
-        if ( flag ) A.proc.signal.Ssignal({ signalId, request: 1 })
     }
     #getRoom2UnitTagSignal(roomName: string, unitName: string, tagName: string): string {
         assertWithMsg( this.plan(roomName, 'unit', unitName) !== null, `${roomName} 的建筑单元 ${unitName} 规划在获取是否完成信号量时, 需要一定规划成功` )
@@ -896,7 +926,7 @@ class PlanModule {
 
         if ( !(tagName in this.#room2UnitTagSignal[roomName][unitName]) ) {
             this.#room2UnitTagSignal[roomName][unitName][tagName] = A.proc.signal.createSignal(0)
-            this.#updateUnitTagSignal(this.#room2UnitTagSignal[roomName][unitName][tagName], roomName, unitName, tagName)
+            this.#updateUnitTagSignal(this.#room2UnitTagSignal[roomName][unitName][tagName], roomName, unitName, tagName, 'exist')
         }
         return this.#room2UnitTagSignal[roomName][unitName][tagName]
     }
@@ -907,6 +937,25 @@ class PlanModule {
      */
     exist(roomName: string, unitName: string, tagName: string) {
         return A.proc.signal.Swait({ signalId: this.#getRoom2UnitTagSignal(roomName, unitName, tagName), lowerbound: 1, request: 0 })
+    }
+    #issueRoomStructureDestroyedWatcher(roomName: string) {
+        const pid = A.proc.createProc([
+            () => {
+                const structureIds = Game.rooms[roomName].getEventLog().filter( e => e.event === EVENT_OBJECT_DESTROYED && e.data.type !== 'creep' ).map(e => e.objectId) as Id<Structure>[]
+                structureIds.forEach(id => {
+                    if ( !!getStructureMemory(id).tag && getStructureMemory(id).tag.length > 0 ) {
+                        getStructureMemory(id).tag.forEach(t => this.#updateUnitTagSignal(this.#getRoom2UnitTagSignal(getStructureMemory(id).pos.roomName, getStructureMemory(id).unitName, t), getStructureMemory(id).pos.roomName, getStructureMemory(id).unitName, t, 'destroyed'))
+                    }
+                    deleteStructureMemory(id)
+                })
+                return A.proc.STOP_SLEEP
+            }
+        ], `清理 ${roomName} 被摧毁的建筑`, true)
+
+        A.proc.trigger('watch', () => {
+            if ( !(roomName in Game.rooms) ) return false
+            return Game.rooms[roomName].getEventLog().filter( e => e.event === EVENT_OBJECT_DESTROYED && e.data.type !== 'creep' ).length > 0
+        }, [ pid ])
     }
     constructor() {
         this.register('unit', PlanModule.PROTECT_UNIT, new Unit([ [STRUCTURE_RAMPART] ]))
@@ -939,9 +988,13 @@ class PlanModule {
                         if ( !structure )
                             log(LOG_ERR, `期望在 ${convertPosToString(info.pos)} 找到建筑 ${info.structureType}, 但是没有找到`)
                         else {
+                            // 更新 建筑 Memory - 用于建筑破坏时更新
+                            getStructureMemory(structure.id).pos = info.pos
+                            getStructureMemory(structure.id).unitName = info.unitName
+                            getStructureMemory(structure.id).tag = info.tag
                             // 更新相关信号量
                             for ( const t of info.tag )
-                                this.#updateUnitTagSignal(this.#getRoom2UnitTagSignal(info.pos.roomName, info.unitName, t), info.pos.roomName, info.unitName, t)
+                                this.#updateUnitTagSignal(this.#getRoom2UnitTagSignal(info.pos.roomName, info.unitName, t), info.pos.roomName, info.unitName, t, 'exist')
                         }
                     }, [ target.pos ], `注册即将完成的建筑 ${target.id} (${target.pos}, ${target.structureType})`)
                 }

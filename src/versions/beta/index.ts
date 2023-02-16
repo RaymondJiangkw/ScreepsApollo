@@ -238,6 +238,11 @@ function issueBuildProc(roomName: string) {
         controllerLevelWatcher.currentValue = Game.rooms[roomName].controller.level
         return restart = controllerLevelWatcher.lastValue !== controllerLevelWatcher.currentValue
     }, [ pid ]))(controllerLevelWatcher)
+    /** 在有建筑被摧毁时触发 */
+    A.proc.trigger('watch', () => {
+        if ( !(roomName in Game.rooms) ) return false
+        return Game.rooms[roomName].getEventLog().filter(e => e.event === EVENT_OBJECT_DESTROYED && e.data.type !== 'creep' ).length > 0
+    }, [ pid ])
 }
 
 function issueRepairProc(roomName: string) {
