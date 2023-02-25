@@ -11,7 +11,8 @@ export function registerCommonConstructions() {
         [Unit.STRUCTURE_ANY,    STRUCTURE_ROAD,                         STRUCTURE_ROAD,         STRUCTURE_ROAD,                         STRUCTURE_ROAD,         STRUCTURE_ROAD,                         Unit.STRUCTURE_ANY]
     ], { 
         'leftContainer': [ [3, 1] ], 
-        'rightContainer': [ [3, 5] ]
+        'rightContainer': [ [3, 5] ], 
+        'link': [ [3, 3] ]
     }), { distanceReferencesFrom: [ STRUCTURE_SPAWN ], distanceReferencesTo: [ STRUCTURE_CONTROLLER, 'mineral', 'sources' ] })
 
     P.register('unit', 'centralTransfer', new Unit([
@@ -24,7 +25,7 @@ export function registerCommonConstructions() {
 
     P.register('road', 'centralSpawn => centralTransfer', 'centralSpawn', 'centralTransfer')
 
-    P.register('unit', 'towers', new Unit([ [ [STRUCTURE_TOWER, STRUCTURE_RAMPART] ] ]), { roadRelationship: 'along', distanceReferencesFrom: [ STRUCTURE_TOWER ], distanceReferencesTo: [ STRUCTURE_STORAGE ], amount: 6 })
+    P.register('unit', 'towers', new Unit([ [ [STRUCTURE_TOWER, STRUCTURE_RAMPART] ] ], { 'tower': [ [0, 0] ] }), { roadRelationship: 'along', distanceReferencesFrom: [ STRUCTURE_TOWER ], distanceReferencesTo: [ STRUCTURE_STORAGE ], amount: 6 })
 
     P.register('unit', 'extensionUnit', new Unit([
         [STRUCTURE_ROAD, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_EXTENSION, STRUCTURE_ROAD],

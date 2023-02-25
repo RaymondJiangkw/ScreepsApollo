@@ -681,8 +681,11 @@ class ProcessModule {
             if (!signal) continue
             signal.value += signalDescriptor.request
             for (const [pid, lb] of signal.stuckList)
-                if ( signal.value >= lb )
-                    this.#wakeUpProc(pid)
+                this.#wakeUpProc(pid)
+                // if ( signal.value >= lb )
+                //     this.#wakeUpProc(pid)
+                // else
+                //     log(LOG_DEBUG, `信号量值 ${signal.value} 不够 ${lb}, 无法唤醒 ${this.#procDict[pid]}`)
             signal.stuckList = []
         }
         
@@ -701,7 +704,7 @@ class ProcessModule {
     /** 监视类触发, 当条件 (同 tick 内稳定) 由假变为真时, 唤醒休眠中进程 */
     trigger( token: 'watch', func: () => boolean, wakeUpProcIdList: ProcId[] ): void
     /** 执行类触发, 当特定函数执行 (通常为原型上函数) 后, 触发特定函数 */
-    trigger( token: 'after', prototype: Object, funcName: string, afterFunc: ( returnValue: any, subject: Object, ...args ) => void ): void
+    trigger( token: 'after', prototype: Object, funcName: string, afterFunc: ( returnValue: any, subject: Object, ...args ) => ProcId[] ): void
     trigger( token, arg1, arg2, arg3?) {
         if ( token === 'watch' ) {
             this.#watchList.push({
@@ -712,10 +715,29 @@ class ProcessModule {
             })
         } else if ( token === 'after' ) {
             const func = arg1[arg2]
-            arg1[arg2] = function (...args) {
+            const procDict = this.#procDict
+            const that = this
+            const wakeUpProc = this.#wakeUpProc;
+            ((func, procDict, that, wakeUpProc) => arg1[arg2] = function (...args) {
                 const returnValue = func.call(this, ...args)
-                arg3(returnValue, this, ...args)
-            }
+                const wakeUpPidList = arg3(returnValue, this, ...args)
+
+                Apollo.timer.add(Game.time + 1, (wakeUpPidList, procDict, that, wakeUpProc) => {
+                    for ( const pid of wakeUpPidList ) {
+                        // 此时允许 pid 不存在
+                        if ( !(pid in procDict) ) continue
+                        const proc = procDict[pid]
+                        // 此时除睡眠外, 允许进程状态为就绪, 阻塞
+                        assertWithMsg( proc.state !== PROCESS_STATE_RUNNING, `触发进程 ${proc} 时, 进程不应该处于运行态` )
+                        log(LOG_DEBUG, `'after' 事件触发, 尝试唤醒 ${proc}`)
+                        // 当且仅当进程为睡眠态时, 才由触发器进行触发
+                        if ( proc.state === PROCESS_STATE_SLEEP )
+                            wakeUpProc.call(that, pid)
+                    }
+                }, [ wakeUpPidList, procDict, that, wakeUpProc ], `'after' ${arg2} 事件后进程唤醒`)
+                
+                return returnValue
+            })(func, procDict, that, wakeUpProc)
         }
     }
 
@@ -845,6 +867,11 @@ class StructureResourceManager {
             value = structure.store.getUsedCapacity(resourceType)
         return value
     }
+    /** 在建筑消失后, 执行的消亡 */
+    delete() {
+        for ( const resourceType in this.#resourceDict )
+            Apollo.proc.signal.destroySignal(this.#resourceDict[resourceType])
+    }
     constructor(id: Id<StorableStructure>) {
         this.#id = id
         this.#resourceDict = {}
@@ -873,7 +900,7 @@ type RequestDescriptor = {
 }
 
 /**
- * 资源模块
+ * 资源模块 - 管理所属资源建筑
  */
 class ResourceModule {
     /** 容量 - 资源常量 */
@@ -889,6 +916,13 @@ class ResourceModule {
         if (id in this.#structureDict)
             return this.#structureDict[id]
         return this.#structureDict[id] = new StructureResourceManager(id)
+    }
+    describeCapacity(structure: StorableStructure, resourceType: ResourceConstant) {
+        if ( structure instanceof StructureLab || structure instanceof StructurePowerSpawn || structure instanceof StructureNuker )
+            if ( resourceType === RESOURCE_ENERGY ) return CAPACITY_ENERGY
+            else return CAPACITY_MINERAL
+        
+        return CAPACITY
     }
     /**
      * 请求资源
@@ -918,6 +952,7 @@ class ResourceModule {
     signal(target: Id<StorableStructure>, resourceType: ResourceType, amount: number) {
         const manager = this.#getStructureResourceManager(target)
         const signalId = manager.getSignal(resourceType)
+        log(LOG_DEBUG, `${target} 获得资源 ${resourceType} (${amount})`)
         return Apollo.proc.signal.Ssignal({ signalId, request: amount })
     }
     /**
@@ -937,49 +972,86 @@ class ResourceModule {
     qeury(target: Id<StorableStructure>, resourceType: ResourceType) {
         return Math.min(this.#qeuryExpected(target, resourceType), this.#qeuryReal(target, resourceType))
     }
-    #room2ResourceSources: { [roomName: string]: { [resourceType in ResourceConstant]?: Id<StorableStructure>[] } } = {}
-    #getResourceSourcesInRoom(roomName: string, resourceType: ResourceType): Id<StorableStructure>[] {
+    #room2ResourceSources: { [roomName: string]: { [resourceType in ResourceConstant]?: {
+        ids: Id<StorableStructure>[], 
+        lastUpdatedTick: number, 
+        existSignalId: string, 
+    } } } = {}
+    #getResourceSourcesInRoom(roomName: string, resourceType: ResourceConstant) {
         if ( !(roomName in this.#room2ResourceSources) ) this.#room2ResourceSources[roomName] = {}
-        if ( !(resourceType in this.#room2ResourceSources[roomName]) ) this.#room2ResourceSources[roomName][resourceType] = []
+        if ( !(resourceType in this.#room2ResourceSources[roomName]) ) this.#room2ResourceSources[roomName][resourceType] = { ids: [], lastUpdatedTick: Game.time, existSignalId: Apollo.proc.signal.createSignal(0) }
+
+        if ( this.#room2ResourceSources[roomName][resourceType].lastUpdatedTick < Game.time ) {
+            this.#room2ResourceSources[roomName][resourceType].ids = this.#room2ResourceSources[roomName][resourceType].ids.filter(id => !!Game.getObjectById(id))
+            this.#room2ResourceSources[roomName][resourceType].lastUpdatedTick = Game.time
+
+            if ( this.#room2ResourceSources[roomName][resourceType].ids.length === 0 && Apollo.proc.signal.getValue(this.#room2ResourceSources[roomName][resourceType].existSignalId) === 1 )
+                Apollo.proc.signal.Swait({ signalId: this.#room2ResourceSources[roomName][resourceType].existSignalId, request: 1, lowerbound: 1 })
+        }
+
         return this.#room2ResourceSources[roomName][resourceType]
     }
     /**
      * 注册房间内资源的一个来源
      */
-    registerSource(roomName: string, resourceType: ResourceType, source: Id<StorableStructure>) {
-        this.#getResourceSourcesInRoom(roomName, resourceType).push(source)
+    registerSource(roomName: string, resourceType: ResourceConstant, source: Id<StorableStructure>) {
+        assertWithMsg( !!Game.getObjectById(source) )
+        this.#getResourceSourcesInRoom(roomName, resourceType).ids.push(source)
+        if ( Apollo.proc.signal.getValue(this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId) === 0 )
+            Apollo.proc.signal.Ssignal({ signalId: this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId, request: 1 })
     }
     /**
      * 删除房间内资源的一个来源
      */
-    removeSource(roomName: string, resourceType: ResourceType, source: Id<StorableStructure>) {
-        _.pull(this.#getResourceSourcesInRoom(roomName, resourceType), source)
+    removeSource(roomName: string, resourceType: ResourceConstant, source: Id<StorableStructure>) {
+        _.pull(this.#getResourceSourcesInRoom(roomName, resourceType).ids, source)
+        if ( this.#getResourceSourcesInRoom(roomName, resourceType).ids.length === 0 && Apollo.proc.signal.getValue(this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId) === 1 )
+            Apollo.proc.signal.Swait({ signalId: this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId, request: 1, lowerbound: 1 })
     }
     /**
      * 请求房间内资源的一个来源
      * @param requestPos 请求资源的发起方位置 - 用于选择来源
      */
-    requestSource(roomName: string, resourceType: ResourceType, requestPos?: RoomPosition): Id<StorableStructure> | null {
-        const candidates = this.#getResourceSourcesInRoom(roomName, resourceType).filter(id => this.qeury(id, resourceType) > 0 && Game.getObjectById(id))
-        if ( candidates.length === 0 ) return null
+    requestSource(roomName: string, resourceType: ResourceConstant, requestPos?: RoomPosition): { code: StuckableAtomicFuncReturnCode, id: Id<StorableStructure> | null } {
+        const candidates = this.#getResourceSourcesInRoom(roomName, resourceType).ids
+        if ( candidates.length === 0 ) return {
+            code: Apollo.proc.signal.Swait({ signalId: this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId, lowerbound: 1, request: 0 }), 
+            id: null, 
+        }
         /** @TODO 优化路径查询 */
-        if ( requestPos ) return _.min(candidates, id => {
-            const res = PathFinder.search(requestPos, Game.getObjectById(id).pos)
-            if ( res.incomplete ) return 0xff
-            else return res.path.length
-        })
+        if ( requestPos ) return {
+            code: Apollo.proc.OK, 
+            id: _.min(candidates, id => {
+                const res = PathFinder.search(requestPos, Game.getObjectById(id).pos)
+                if ( res.incomplete ) return 0xff
+                else return res.path.length
+            }), 
+        }
         
-        return _.max(candidates, id => this.qeury(id, resourceType))
+        return {
+            code: Apollo.proc.OK, 
+            id: _.max(candidates, id => this.qeury(id, resourceType))
+        }
     }
     print(roomName: string) {
         if ( !(roomName in this.#room2ResourceSources) ) return
         for ( const resouceType in this.#room2ResourceSources[roomName] ) {
-            this.#room2ResourceSources[roomName][resouceType as ResourceConstant].forEach(id => {
+            this.#room2ResourceSources[roomName][resouceType as ResourceConstant].ids.forEach(id => {
                 const structure = Game.getObjectById(id)
                 if ( !structure ) return
                 log(LOG_INFO, `${roomName} => ${resouceType}, ${structure}: ${this.#qeuryExpected(id, resouceType as ResourceConstant)} / ${this.#qeuryExpected(id, CAPACITY)}`)
             })
         }
+    }
+    private init() {
+        Apollo.timer.add(Game.time + Math.ceil(Math.random() * CREEP_LIFE_TIME), () => {
+            const ids = Object.keys(this.#structureDict)
+            for ( const id of ids ) {
+                if ( !!Game.getObjectById(id as Id<StorableStructure>) ) continue
+                this.#structureDict[id as Id<StorableStructure>].delete()
+                delete this.#structureDict[id as Id<StorableStructure>]
+            }
+        }, [], `资源模块定期检查资源建筑消亡`, CREEP_LIFE_TIME)
     }
 }
 
@@ -1060,4 +1132,5 @@ class ApolloKernel {
     }
 }
 
-export const Apollo = new ApolloKernel()
+export const Apollo = new ApolloKernel();
+(Apollo.res as any).init()

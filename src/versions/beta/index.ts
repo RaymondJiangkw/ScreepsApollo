@@ -4,6 +4,7 @@ import { planModule as P } from '@/modules/plan'
 import { assertWithMsg, getAvailableSurroundingPos, log, LOG_DEBUG, LOG_INFO } from '@/utils'
 import { registerCommonConstructions } from './config.construction'
 import { issueHarvestSource, registerHarvestSource } from './modules/harvestSource'
+import { isBelongingToQuickEnergyFilling, issueQuickEnergyFill, registerQuickEnergyFill } from './modules/quickEnergyFill'
 import { mountAllPrototypes } from './prototypes'
 
 /** AI 挂载入口 */
@@ -37,8 +38,8 @@ function getEnergy(roomName: string, getWorkerName: () => string, setWorkerName:
         }
 
         if ( targetId === null ) {
-            targetId = A.res.requestSource(roomName, RESOURCE_ENERGY, creep.pos)
-            if ( !targetId ) {
+            targetId = A.res.requestSource(roomName, RESOURCE_ENERGY, creep.pos).id
+            if ( !targetId || A.res.qeury(targetId, RESOURCE_ENERGY) <= 0 ) {
                 // Source 旁边的空位应当 > 1
                 const source = creep.pos.findClosestByRange(FIND_SOURCES, { filter: s => s.energy > 0 && getAvailableSurroundingPos(s.pos).length > 1 })
                 if ( source ) targetId = source.id
@@ -134,7 +135,7 @@ function issueHarvestProc(roomName: string) {
             return A.proc.OK_STOP_CURRENT
         }
 
-        const spawns = Game.rooms[roomName].find<FIND_STRUCTURES, StructureSpawn | StructureExtension>(FIND_STRUCTURES, { filter: s => (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_EXTENSION) && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 })
+        const spawns = Game.rooms[roomName].find<FIND_STRUCTURES, StructureSpawn | StructureExtension | StructureTower>(FIND_STRUCTURES, { filter: s => (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_EXTENSION || s.structureType === STRUCTURE_TOWER) && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && !isBelongingToQuickEnergyFilling(s.pos) })
 
         if ( spawns.length === 0 ) {
             /** 此时, 本进程无用, 释放资源并休眠 */
@@ -236,7 +237,7 @@ function issueBuildProc(roomName: string) {
     (controllerLevelWatcher => A.proc.trigger('watch', () => {
         controllerLevelWatcher.lastValue = controllerLevelWatcher.currentValue
         controllerLevelWatcher.currentValue = Game.rooms[roomName].controller.level
-        return restart = controllerLevelWatcher.lastValue !== controllerLevelWatcher.currentValue
+        return restart = restart || controllerLevelWatcher.lastValue !== controllerLevelWatcher.currentValue
     }, [ pid ]))(controllerLevelWatcher)
     /** 在有建筑被摧毁时触发 */
     A.proc.trigger('watch', () => {
@@ -250,7 +251,7 @@ function issueRepairProc(roomName: string) {
     let repairedPos: RoomPosition = null
 
     function getRepairedPos() {
-        const structure = _.min(Game.rooms[roomName].find(FIND_STRUCTURES, { filter: s => s.hits < s.hitsMax }), s => s.hits / s.hitsMax)
+        const structure = _.min(Game.rooms[roomName].find(FIND_STRUCTURES, { filter: s => s.hits < s.hitsMax && s.structureType !== STRUCTURE_RAMPART && s.structureType !== STRUCTURE_WALL }), s => s.hits / s.hitsMax)
         if ( !(structure instanceof Structure) ) return A.proc.STOP_SLEEP
         else {
             log(LOG_DEBUG, `发现需要修理的建筑 ${structure}`)
@@ -275,7 +276,7 @@ function issueRepairProc(roomName: string) {
         }
         
         if ( creep.pos.roomName === roomName && creep.pos.getRangeTo(repairedPos) <= 3 ) {
-            const structure = _.min(Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, repairedPos).filter(s => s.hits < s.hitsMax), s => s.hits / s.hitsMax)
+            const structure = _.min(Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, repairedPos).filter(s => s.hits < s.hitsMax && s.structureType !== STRUCTURE_RAMPART && s.structureType !== STRUCTURE_WALL), s => s.hits / s.hitsMax)
             if ( structure instanceof Structure ) creep.repair(structure)
             else {
                 C.release(name)
@@ -308,16 +309,97 @@ function issueRepairProc(roomName: string) {
     }, [ pid ])
 }
 
+function issuePaintProc(roomName: string) {
+    let workerName = null
+
+    function getPaintedPos() {
+        const structure = _.min(Game.rooms[roomName].find(FIND_STRUCTURES, { filter: s => s.hits < s.hitsMax && (s.structureType === STRUCTURE_RAMPART || s.structureType === STRUCTURE_WALL) }), s => s.hits / s.hitsMax)
+        if ( !(structure instanceof Structure) ) return A.proc.STOP_SLEEP
+        else log(LOG_DEBUG, `发现需要刷墙的建筑 ${structure}`)
+        return A.proc.OK
+    }
+
+    function gotoStructure(name: string) {
+        const creep = Game.creeps[name]
+        /** 检测到错误, 立即释放资源 */
+        if ( !creep ) {
+            C.cancel(name)
+            workerName = null
+            return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
+        }
+
+        if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) {
+            C.release(name)
+            workerName = null
+            return A.proc.OK
+        }
+
+        const structure = _.min(Game.rooms[roomName].find(FIND_STRUCTURES, { filter: s => s.hits < s.hitsMax && (s.structureType === STRUCTURE_RAMPART || s.structureType === STRUCTURE_WALL) }), s => s.hits / s.hitsMax)
+
+        if ( !(structure instanceof Structure) ) {
+            C.release(name)
+            workerName = null
+            return [ A.proc.OK_STOP_CUSTOM, 'getPaintedPos' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+        }
+        
+        if ( creep.pos.roomName === roomName && creep.pos.getRangeTo(structure) <= 3 ) creep.repair(structure)
+        else creep.travelTo(structure)
+
+        return A.proc.OK_STOP_CURRENT
+    }
+
+    const gotoSource = getEnergy(roomName, () => workerName, name => workerName = name)
+
+    const pid = A.proc.createProc([
+        ['getPaintedPos', () => getPaintedPos()], 
+        () => C.acquire('worker', roomName, name => workerName = name), 
+        [ 'gotoSource', gotoSource ], 
+        () => gotoStructure(workerName), 
+        [ 'JUMP', () => true, 'getPaintedPos' ]
+    ], `${roomName} => Paint`)
+
+    let lastTriggerTick = Game.time
+    /** Repair 定时触发 */
+    A.proc.trigger('watch', () => {
+        if ( Game.time - lastTriggerTick > RAMPART_DECAY_TIME / 2 ) {
+            lastTriggerTick = Game.time
+            return true
+        } else return false
+    }, [ pid ])
+}
+
+function issueTowerProc(roomName: string) {
+    A.proc.createProc([
+        () => P.exist(roomName, 'towers', 'tower'), 
+        () => {
+            if ( !Game.rooms[roomName] ) return [A.proc.STOP_ERR, `${roomName} 房间无视野`] as [ typeof A.proc.STOP_ERR, string ]
+            const towers = Game.rooms[roomName].find<FIND_STRUCTURES, StructureTower>(FIND_STRUCTURES, { filter: s => s.structureType === STRUCTURE_TOWER })
+            if ( towers.length === 0 ) return [A.proc.STOP_ERR, `${roomName} 房间无可用 Tower`] as [ typeof A.proc.STOP_ERR, string ]
+            
+            for ( const creep of Game.rooms[roomName].find(FIND_HOSTILE_CREEPS) )
+                towers.forEach(t => t.attack(creep))
+            
+            for ( const creep of Game.rooms[roomName].find(FIND_MY_CREEPS) )
+                if ( creep.hits < creep.hitsMax )
+                    towers.forEach(t => t.heal(creep))
+            
+            return A.proc.OK_STOP_CURRENT
+        }
+    ], `${roomName} => Tower`)
+}
+
 /** AI 注册入口 */
 export function registerAll() {
     /** 建筑规划 */
     registerCommonConstructions()
     /** Source Harvest 模块 */
     registerHarvestSource()
+    /** Quick Energy Filling 模块 */
+    registerQuickEnergyFill()
 
     C.design('worker', {
         body: [ WORK, CARRY, MOVE ], 
-        amount: 4, 
+        amount: 5, 
     })
     
     for ( const roomName in Game.rooms ) {
@@ -343,7 +425,12 @@ export function registerAll() {
         issueHarvestProc(roomName)
         issueBuildProc(roomName)
         issueRepairProc(roomName)
+        issuePaintProc(roomName)
+        issueTowerProc(roomName)
+        
         /** Source Harvest 模块 */
         issueHarvestSource(roomName, A.proc.signal.createSignal(0), () => [])
+        /** Quick Energy Filling 模块 */
+        issueQuickEnergyFill(roomName)
     }
 }

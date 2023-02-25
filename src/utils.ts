@@ -3,6 +3,10 @@ export function assertWithMsg(condition: boolean, message: string = 'Assert 时�
         throw new Error(message)
 }
 
+export function raiseNotImplementedError() {
+    throw new Error('尚未实现')
+}
+
 // ----------------------------------------------------------------
 /** Log Level - Profile */
 export const LOG_PROFILE = 4
@@ -28,7 +32,7 @@ export function log(level: LOG_LEVEL, ...args): void {
 
 // ----------------------------------------------------------------
 
-export const generate_random_hex = size => [...Array(size)].map(() => Math.floor(Math.random() * 16).toString(16)).join('')
+export const generate_random_hex = (size: number) => [...Array(size)].map(() => Math.floor(Math.random() * 16).toString(16)).join('')
 
 // ----------------------------------------------------------------
 
@@ -85,4 +89,27 @@ export function getAvailableSurroundingPos(pos: Pos): Pos[] {
 
 export function convertPosToString(pos: Pos) {
     return `[room ${pos.roomName} pos ${pos.x},${pos.y}]`
+}
+
+export function insertSortedBy<T>(arr: T[], value: T, iteratee?: string | ((element: T) => any)) {
+    arr.splice(_.sortedIndex(arr, value, iteratee), 0, value)
+}
+
+export function getUsedCapacity(structure: StorableStructure) {
+    if ( structure instanceof StructureExtension )
+        return structure.store.getUsedCapacity(RESOURCE_ENERGY)
+    else if ( structure instanceof StructureLink )
+        return structure.store.getUsedCapacity(RESOURCE_ENERGY)
+    else if ( structure instanceof StructureSpawn )
+        return structure.store.getUsedCapacity(RESOURCE_ENERGY)
+    else if ( structure instanceof StructureTower )
+        return structure.store.getUsedCapacity(RESOURCE_ENERGY)
+    else if ( structure instanceof StructureLab )
+        return structure.store.getUsedCapacity(RESOURCE_ENERGY) + structure.store.getUsedCapacity(structure.mineralType || RESOURCE_HYDROGEN)
+    else if ( structure instanceof StructurePowerSpawn )
+        return structure.store.getUsedCapacity(RESOURCE_ENERGY) + structure.store.getUsedCapacity(RESOURCE_POWER)
+    else if ( structure instanceof StructureNuker )
+        return structure.store.getUsedCapacity(RESOURCE_ENERGY) + structure.store.getUsedCapacity(RESOURCE_GHODIUM)
+    else
+        return structure.store.getUsedCapacity()
 }

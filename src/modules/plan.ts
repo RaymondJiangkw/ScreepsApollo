@@ -832,6 +832,7 @@ class PlanModule {
 
                     if ( !flag ) {
                         log(LOG_DEBUG, `房间 ${roomName} 跳过考虑建筑单元 ${name}`)
+                        this.#room2skipUnit[roomName].push(name)
                         ++this.#room2currentBuildPointer[roomName]
                         continue
                     }
@@ -862,6 +863,18 @@ class PlanModule {
                         return { structureType: STRUCTURE_ROAD, pos }
             }
             ++this.#room2currentBuildPointer[roomName]
+        }
+
+        /** 处理 保护墙 的情况 */
+        const constructionSites = this.plan(roomName, 'unit', PlanModule.PROTECT_UNIT)
+        for ( const structureType of this.#BUILD_PRIORITY ) {
+            if ( !(structureType in constructionSites.structures) ) continue
+            for ( const {pos, tag} of constructionSites.structures[structureType] ) {
+                if ( !Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, pos).map(s => s.structureType).includes(structureType) ) {
+                    if ( !(convertPosToString(pos) in this.#constructionSite2Info) ) this.#constructionSite2Info[convertPosToString(pos)] = { pos, unitName: PlanModule.PROTECT_UNIT, tag, structureType }
+                    return { structureType, pos }
+                }
+            }
         }
 
         // 此时: this.#room2currentBuildPointer[roomName] >= this.#planOrder.length
@@ -938,6 +951,14 @@ class PlanModule {
     exist(roomName: string, unitName: string, tagName: string) {
         return A.proc.signal.Swait({ signalId: this.#getRoom2UnitTagSignal(roomName, unitName, tagName), lowerbound: 1, request: 0 })
     }
+    /**
+     * 判定房间 `roomName` 中建筑单元 `unitName` 的标签 `tagName` 位置是否已经建造完成
+     * 在多数量建筑单元情况下, 默认是完成一个建筑单元中的要求, 即满足条件
+     * 注意: 只有通过 `recommend` 方法得到的建造位置, 才会自动检测建筑是否完成
+     */
+    isExisted(roomName: string, unitName: string, tagName: string) {
+        return !!A.proc.signal.getValue(this.#getRoom2UnitTagSignal(roomName, unitName, tagName))
+    }
     #issueRoomStructureDestroyedWatcher(roomName: string) {
         const pid = A.proc.createProc([
             () => {
@@ -999,6 +1020,7 @@ class PlanModule {
                     }, [ target.pos ], `注册即将完成的建筑 ${target.id} (${target.pos}, ${target.structureType})`)
                 }
             }
+            return []
         })
     }
 }

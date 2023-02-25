@@ -386,7 +386,8 @@ class CreepSpawnModule {
                 // 最高响应比优先调度算法
                 // 这里等待 tick 乘以的系数应当最好为每秒本房间
                 // energy 的产量
-                const orders = _.sortBy(this.#repo[roomName][priority], (element: RequestCreepType) => -((Game.time - element.requestTick) * 50.0 + element.cost) / element.cost)
+                // const orders = _.sortBy(this.#repo[roomName][priority], (element: RequestCreepType) => -((Game.time - element.requestTick) * 50.0 + element.cost) / element.cost)
+                const orders = _.sortBy(this.#repo[roomName][priority], (element: RequestCreepType) => element.cost)
                 log(LOG_DEBUG, `${roomName} 当前优先级为 ${priority} 的等待生产 Creep 的数量为 ${orders.length}`)
                 for (const order of orders) {
                     // 检查是否为特定 Spawn
@@ -435,6 +436,7 @@ class CreepSpawnModule {
         A.proc.trigger('after', Creep.prototype, 'claimController', (returnValue: CreepActionReturnCode, creep: Creep, target: StructureController) => {
             if ( returnValue === OK )
                 this.#issueRoomSpawnProc(target.room.name)
+            return []
         })
     }
 }
