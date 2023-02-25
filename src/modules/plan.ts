@@ -2,7 +2,7 @@
  * 🛠️ 自动规划模块
  */
 
-import { assertWithMsg, constructArray, convertPosToString, log, LOG_DEBUG, LOG_ERR, LOG_INFO, LOG_PROFILE } from "@/utils"
+import { assertWithMsg, constructArray, convertPosToString, getAvailableSurroundingPos, log, LOG_DEBUG, LOG_ERR, LOG_INFO, LOG_PROFILE } from "@/utils"
 import { Apollo as A } from "@/framework/apollo"
 import { deleteStructureMemory, getStructureMemory } from "./structureMemory"
 
@@ -98,8 +98,14 @@ interface PlanModuleRegisterUnitOpts {
     distanceReferencesFrom? : StructureConstant[]
     /** 与路径的位置关系 - 沿着路径 */
     roadRelationship? : 'along'
+    /** 是否在某个特殊的建筑上 */
+    on?: Pos
+    /** 是否在某个特殊的建筑周围 */
+    aroundRelationship? : Pos
     /** 规划的本建筑单元数量 */
-    amount? : number
+    amount? : number, 
+    /** 不对该区域保护 */
+    freeFromProtect? : boolean
 }
 
 interface RoadRegisterOpts {
@@ -154,7 +160,7 @@ class PlanModule {
         const cacheDict = this.#getCacheDict()
         if ( !(roomName in cacheDict) ) cacheDict[roomName] = {}
         if ( !(unitName in cacheDict[roomName]) ) cacheDict[roomName][unitName] = []
-        const unit = this.#unitDict[unitName].unit
+        const { unit, opts } = this.#unitDict[unitName]
         if ( !registerOnly )
             cacheDict[roomName][unitName].push(...leftTop)
         for ( const pos of leftTop ) {
@@ -172,7 +178,7 @@ class PlanModule {
                 this.#getRoomStructure2Pos(roomName, structureType).push(...unit.getStructurePositions(structureType, pos))
             
             // 更新保护区域
-            if ( unitName !== PlanModule.PROTECT_UNIT ) {
+            if ( unitName !== PlanModule.PROTECT_UNIT && !opts.freeFromProtect ) {
                 // log(LOG_DEBUG, `为房间 ${roomName} 注册需要保护的区域 (${unitName}): (${pos.x}, ${pos.y}, ${pos.x + unit.width - 1}, ${pos.y + unit.height - 1})`)
                 this.#getProtectRectangles(roomName).push( {x1: pos.x, y1: pos.y, x2: pos.x + unit.width - 1, y2: pos.y + unit.height - 1} )
             }
@@ -239,9 +245,15 @@ class PlanModule {
         if ( token === 'unit' ) {
             if ( arg3 === undefined ) arg3 = {}
             _.defaults( arg3, { distanceReferencesTo: [], distanceReferencesFrom: [], amount: 1 } )
-            this.#unitDict[ arg1 ] = { unit: arg2, opts: arg3 }
-            if ( arg1 !== PlanModule.PROTECT_UNIT )
-                this.#planOrder.push({ token: 'unit', name: arg1, specializedToRoom: null })
+            const opts: PlanModuleRegisterUnitOpts = arg3
+            assertWithMsg( !(!!opts.on && !!opts.aroundRelationship), `指定建筑单元 ${arg1} 时, 所在位置和围绕位置不可同时给定` )
+            this.#unitDict[ arg1 ] = { unit: arg2, opts }
+            if ( arg1 !== PlanModule.PROTECT_UNIT ) {
+                let specializedToRoom = null
+                if ( !!opts.on ) specializedToRoom = opts.on.roomName
+                else if ( !!opts.aroundRelationship ) specializedToRoom = opts.aroundRelationship.roomName
+                this.#planOrder.push({ token: 'unit', name: arg1, specializedToRoom })
+            }
         } else if ( token === 'road' ) {
             if ( arg4 === undefined ) arg4 = {}
             _.defaults( arg4, { range: 0 } )
@@ -458,8 +470,16 @@ class PlanModule {
                 const { unit, opts } = this.#unitDict[name]
                 log(LOG_INFO, `正在为房间 ${roomName} 规划建筑单元 ${name} ...`)
                 let candidatePos: Pos[] = []
-                // 枚举左上位置
-                for (let x = 0 + PlanModule.#MARGIN; x < this.ROOM_WIDTH - PlanModule.#MARGIN - unit.width; ++x)
+                if ( !!opts.on ) {
+                    candidatePos.push( opts.on )
+                } else if ( !!opts.aroundRelationship ) {
+                    const choice = getAvailableSurroundingPos(opts.aroundRelationship)
+                                .filter(pos => this.#getUsedRoomPos(roomName)[pos.x][pos.y] === 'road')[0]
+                    if ( !!choice )
+                        candidatePos.push(choice)
+                } else {
+                    // 枚举左上位置
+                    for (let x = 0 + PlanModule.#MARGIN; x < this.ROOM_WIDTH - PlanModule.#MARGIN - unit.width; ++x)
                     for (let y = 0 + PlanModule.#MARGIN; y < this.ROOM_WIDTH - PlanModule.#MARGIN - unit.height; ++y) {
                         // 满足空间要求
                         const freeArea = this.#getEmptySpace(roomName, x, y, x + unit.width - 1, y + unit.height - 1)
@@ -502,25 +522,26 @@ class PlanModule {
                         candidatePos.push({ x, y, roomName })
                     }
                 
-                // 根据距离计算权重
-                if ( opts.distanceReferencesFrom.length > 0 && opts.distanceReferencesTo.length > 0 ) {
-                    candidatePos = _.map(candidatePos, pos => {
-                        const fromPos: Pos[] = []
-                        opts.distanceReferencesFrom.forEach(structureType => fromPos.push(...unit.getStructurePositions(structureType, pos)))
-                        const toPos: Pos[] = []
-                        for ( const type of opts.distanceReferencesTo ) {
-                            if ( type === "sources" ) toPos.push(...Game.rooms[roomName].find(FIND_SOURCES).map(s => s.pos))
-                            else if ( type === "mineral" ) toPos.push(...Game.rooms[roomName].find(FIND_MINERALS).map(m => m.pos))
-                            else if ( type === STRUCTURE_CONTROLLER || type === STRUCTURE_EXTRACTOR ) toPos.push(...Game.rooms[roomName].find(FIND_STRUCTURES, { filter: { structureType: type } }).map(s => s.pos))
-                            else toPos.push(...this.#getRoomStructure2Pos(roomName, type))
-                        }
+                    // 根据距离计算权重
+                    if ( opts.distanceReferencesFrom.length > 0 && opts.distanceReferencesTo.length > 0 ) {
+                        candidatePos = _.map(candidatePos, pos => {
+                            const fromPos: Pos[] = []
+                            opts.distanceReferencesFrom.forEach(structureType => fromPos.push(...unit.getStructurePositions(structureType, pos)))
+                            const toPos: Pos[] = []
+                            for ( const type of opts.distanceReferencesTo ) {
+                                if ( type === "sources" ) toPos.push(...Game.rooms[roomName].find(FIND_SOURCES).map(s => s.pos))
+                                else if ( type === "mineral" ) toPos.push(...Game.rooms[roomName].find(FIND_MINERALS).map(m => m.pos))
+                                else if ( type === STRUCTURE_CONTROLLER || type === STRUCTURE_EXTRACTOR ) toPos.push(...Game.rooms[roomName].find(FIND_STRUCTURES, { filter: { structureType: type } }).map(s => s.pos))
+                                else toPos.push(...this.#getRoomStructure2Pos(roomName, type))
+                            }
 
-                        let cost = 0
-                        for (const posU of fromPos)
-                            for (const posV of toPos)
-                                cost += this.#estimateInRoomDistance(posU, posV)
-                        return { pos, cost }
-                    }).sort( (u, v) => u.cost - v.cost ).map(e => e.pos)
+                            let cost = 0
+                            for (const posU of fromPos)
+                                for (const posV of toPos)
+                                    cost += this.#estimateInRoomDistance(posU, posV)
+                            return { pos, cost }
+                        }).sort( (u, v) => u.cost - v.cost ).map(e => e.pos)
+                    }
                 }
 
                 for ( let amountIdx = 0; amountIdx < opts.amount; ++amountIdx ) {
@@ -530,7 +551,7 @@ class PlanModule {
                         return false
                     }
                     this.#setUnitPos(roomName, name, [ candidatePos.shift() ])
-                    // 筛选掉不满足的位置
+                    // 占用新位置后, 更新筛选掉不满足的位置
                     // 只考虑 此地占用问题
                     candidatePos = _.filter(candidatePos, ({ x, y }) => {
                         let flag = false
@@ -747,6 +768,8 @@ class PlanModule {
                 visFunc = (p: Pos) => visual.text('📦', p.x, p.y)
             } else if ( structureType === STRUCTURE_NUKER ) {
                 visFunc = (p: Pos) => visual.text('💣', p.x, p.y)
+            } else if ( structureType === STRUCTURE_EXTRACTOR ) {
+                visFunc = (p: Pos) => visual.text('⛏️', p.x, p.y)
             } else {
                 log(LOG_ERR, `在可视化房间 ${roomName} 的建筑规划时, 发现未识别建筑类型 ${structureType}`)
             }

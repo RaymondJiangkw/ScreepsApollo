@@ -95,41 +95,46 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos) {
         return A.proc.OK
     }
 
-    function fillContainerPrepareCapacity( containerId: Id<StructureContainer>, containerEnergyGap: number[], containerEnergyGapSignal: string ) {
+    function fillContainer( containerId: Id<StructureContainer>, containerEnergyGap: number[], containerEnergyGapSignal: string ) {
         if ( !Game.getObjectById(containerId) ) {
             containerEnergyGap.length = 0
             A.proc.signal.Swait({ signalId: containerEnergyGapSignal, request: A.proc.signal.getValue(containerEnergyGapSignal), lowerbound: A.proc.signal.getValue(containerEnergyGapSignal) })
             return [ A.proc.OK_STOP_CUSTOM, 'check' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
         }
         assertWithMsg( containerEnergyGap.length > 0 )
-        const energyGap = containerEnergyGap[0]
-        const capacityRequestCode = A.res.request({ id: containerId, resourceType: A.res.CAPACITY, amount: energyGap })
-        return capacityRequestCode
-    }
-
-    function fillContainerIssueTransfer( containerId: Id<StructureContainer>, containerEnergyGap: number[], containerEnergyGapSignal: string ) {
-        if ( !Game.getObjectById(containerId) ) {
-            containerEnergyGap.length = 0
-            A.proc.signal.Swait({ signalId: containerEnergyGapSignal, request: A.proc.signal.getValue(containerEnergyGapSignal), lowerbound: A.proc.signal.getValue(containerEnergyGapSignal) })
-            return [ A.proc.OK_STOP_CUSTOM, 'check' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
-        }
-        assertWithMsg( containerEnergyGap.length > 0 )
-        const energyGap = containerEnergyGap[0]
-        /** 无 Link 时 */
+        /** 尝试获得能量来源 */
+        /** === 无 Link 时 === */
         const requestedSource = A.res.requestSource( roomName, RESOURCE_ENERGY )
         if ( requestedSource.code !== A.proc.OK )
             return requestedSource.code
         const amount = A.res.qeury(requestedSource.id, RESOURCE_ENERGY)
         if ( amount === 0 )
-            return A.res.request({ id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: energyGap })
-        assertWithMsg( A.res.request({id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: Math.min(amount, energyGap)}) === A.proc.OK )
-        T.transfer(requestedSource.id, containerId, RESOURCE_ENERGY, Math.min(amount, energyGap))
-        containerEnergyGap[0] -= Math.min(amount, energyGap)
-        if ( containerEnergyGap[0] > 0 ) return A.proc.OK_STOP_CURRENT
-        else {
-            containerEnergyGap.shift()
-            return [ A.proc.OK_STOP_CUSTOM, 'wait' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+            return A.res.request({ id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: containerEnergyGap[0] })
+        const capacity = A.res.qeury(containerId, A.res.CAPACITY)
+        if ( capacity === 0 )
+            return A.res.request({ id: containerId, resourceType: A.res.CAPACITY, amount: containerEnergyGap[0] })
+        // 尝试尽可能多的转移能量
+        let energyGap = 0
+        while ( true ) {
+            const currentPlus = Math.min(amount - energyGap, capacity - energyGap, containerEnergyGap[0])
+            energyGap += currentPlus
+            containerEnergyGap[0] -= currentPlus
+            if ( containerEnergyGap[0] > 0 ) break
+            else {
+                containerEnergyGap.shift()
+                if ( containerEnergyGap.length === 0 ) break
+                else assertWithMsg( A.proc.signal.Swait( { signalId: containerEnergyGapSignal, lowerbound: 1, request: 1 } ) === A.proc.OK )
+            }
         }
+        assertWithMsg( energyGap > 0 )
+        assertWithMsg( A.res.request({ id: containerId, resourceType: A.res.CAPACITY, amount: energyGap }) === A.proc.OK )
+        assertWithMsg( A.res.request({id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: energyGap}) === A.proc.OK )
+        T.transfer(requestedSource.id, containerId, RESOURCE_ENERGY, energyGap)
+
+        if ( containerEnergyGap.length === 0 )
+            return [ A.proc.OK_STOP_CUSTOM, 'wait' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+        else
+            return A.proc.OK_STOP_CURRENT
     }
 
     A.proc.createProc([
@@ -137,8 +142,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos) {
         ['check', () => checkContainerId( posLeftContainer, () => idLeftContainer, id => idLeftContainer = id )], 
         () => initContainerFilling( idLeftContainer, LeftContainerEnergyGap, LeftContainerEnergyGapSignal ), 
         ['wait', () => A.proc.signal.Swait({ signalId: LeftContainerEnergyGapSignal, lowerbound: 1, request: 1 })], 
-        () => fillContainerPrepareCapacity( idLeftContainer, LeftContainerEnergyGap, LeftContainerEnergyGapSignal ), 
-        () => fillContainerIssueTransfer( idLeftContainer, LeftContainerEnergyGap, LeftContainerEnergyGapSignal )
+        () => fillContainer( idLeftContainer, LeftContainerEnergyGap, LeftContainerEnergyGapSignal ), 
     ], `${roomName} => Container Filling (Left)`)
 
     A.proc.createProc([
@@ -146,8 +150,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos) {
         ['check', () => checkContainerId( posRightContainer, () => idRightContainer, id => idRightContainer = id )], 
         () => initContainerFilling( idRightContainer, RightContainerEnergyGap, RightContainerEnergyGapSignal ), 
         ['wait', () => A.proc.signal.Swait({ signalId: RightContainerEnergyGapSignal, lowerbound: 1, request: 1 })], 
-        () => fillContainerPrepareCapacity( idRightContainer, RightContainerEnergyGap, RightContainerEnergyGapSignal ), 
-        () => fillContainerIssueTransfer( idRightContainer, RightContainerEnergyGap, RightContainerEnergyGapSignal )
+        () => fillContainer( idRightContainer, RightContainerEnergyGap, RightContainerEnergyGapSignal ), 
     ], `${roomName} => Container Filling (Right)`)
 
     const LeftTopPool: TransferTaskDescriptor[]     = []
@@ -167,7 +170,11 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos) {
         if ( !Game.getObjectById(containerId) )
             return [ A.proc.OK_STOP_CUSTOM, 'check' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
 
-        const structures = Game.rooms[roomName].lookForAtArea(LOOK_STRUCTURES, top, left, bottom, right, true).map(s => s.structure).filter(s => (s.structureType === STRUCTURE_EXTENSION || s.structureType === STRUCTURE_SPAWN) && (s as StructureExtension | StructureSpawn).store.getFreeCapacity(RESOURCE_ENERGY) > (issuedTransferFor[convertPosToString(s.pos)] || 0) ) as (StructureSpawn | StructureExtension)[]
+        const structures = Game.rooms[roomName]
+            .lookForAtArea(LOOK_STRUCTURES, top, left, bottom, right, true)
+            .map(s => s.structure)
+            .filter((s: StorableStructure) => (s.structureType === STRUCTURE_EXTENSION || s.structureType === STRUCTURE_SPAWN) && s.store.getFreeCapacity(RESOURCE_ENERGY) > (issuedTransferFor[convertPosToString(s.pos)] || 0) )
+            .sort((u: StorableStructure, v: StorableStructure) => (u.store.getFreeCapacity(RESOURCE_ENERGY) - (issuedTransferFor[convertPosToString(u.pos)] || 0)) - (v.store.getFreeCapacity(RESOURCE_ENERGY) - (issuedTransferFor[convertPosToString(v.pos)] || 0))) as (StructureSpawn | StructureExtension)[]
         log(LOG_DEBUG, `${roomName} => 需要快速填充的建筑: ${structures}`)
         /** 暂无 Structure 需要填充能量 */
         if ( structures.length === 0 ) return A.proc.STOP_SLEEP

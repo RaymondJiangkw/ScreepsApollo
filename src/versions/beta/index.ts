@@ -1,6 +1,6 @@
 import { Apollo as A } from '@/framework/apollo'
 import { creepModule as C } from '@/modules/creep'
-import { planModule as P } from '@/modules/plan'
+import { planModule as P, Unit } from '@/modules/plan'
 import { assertWithMsg, getAvailableSurroundingPos, log, LOG_DEBUG, LOG_INFO } from '@/utils'
 import { registerCommonConstructions } from './config.construction'
 import { issueHarvestSource, registerHarvestSource } from './modules/harvestSource'
@@ -408,7 +408,11 @@ export function registerAll() {
         /** 建筑规划 */
         P.register('road', `${roomName}: centralSpawn => Controller`, 'centralSpawn', room.controller.pos, { range: 1 })
         room.find(FIND_SOURCES).forEach(source => P.register('road', `${roomName}: centralSpawn => Source ${source.id}`, 'centralSpawn', source.pos, { range: 1 }))
-        room.find(FIND_MINERALS).forEach(mineral => P.register('road', `${roomName}: centralSpawn => Mineral ${mineral.id}`, 'centralSpawn', mineral.pos, { range: 1 }))
+        room.find(FIND_MINERALS).forEach(mineral => {
+            P.register('road', `${roomName}: centralSpawn => Mineral ${mineral.id}`, 'centralSpawn', mineral.pos, { range: 1 })
+            P.register('unit', `${roomName}: extractor`, new Unit([ [STRUCTURE_EXTRACTOR] ], { 'extractor': [ [0, 0] ] }), { on: mineral.pos, freeFromProtect: true })
+            P.register('unit', `${roomName}: mineral's container`, new Unit([ [STRUCTURE_CONTAINER] ], { 'container': [ [0, 0] ] }), { aroundRelationship: mineral.pos, freeFromProtect: true })
+        })
 
         // 房间可视化进程
         A.timer.add(Game.time + 1, (roomName, container) => {
