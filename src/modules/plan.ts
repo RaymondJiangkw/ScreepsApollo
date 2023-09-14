@@ -622,8 +622,9 @@ class PlanModule {
                 this.#setRoads(roomName, name, paths)
             }
         }
-
-        if ( !alreadyPlanned ) {
+        
+        // 新注册建筑单元 or Script 超时未完成计算
+        if ( !alreadyPlanned || this.#getUnitPos(roomName, PlanModule.PROTECT_UNIT) === null || this.#getUnitPos(roomName, PlanModule.PROTECT_UNIT).length <= 0 ) {
             // 特殊情况: 保护墙规划
             const extend = (rect: Rectangle, range = 3) => {
                 rect.x1 = Math.max(1, rect.x1 - range);
@@ -634,6 +635,7 @@ class PlanModule {
             }
 
             const ramparts = getCutTiles(roomName, _.uniq(this.#getProtectRectangles(roomName), e => `${e.x1},${e.y1},${e.x2},${e.y2}`).map(r => extend(r)), true, Infinity, false)
+            assertWithMsg(ramparts.length > 0, `规范房间 ${roomName} 保护墙为空`)
 
             this.#setUnitPos(roomName, PlanModule.PROTECT_UNIT, ramparts)
             this.#havePlannedRoom.push(roomName)

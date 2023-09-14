@@ -1,6 +1,14 @@
 import { planModule as P, Unit } from '@/modules/plan'
+import { getMyRooms } from '@/utils'
 
 export function registerCommonConstructions() {
+    /** @NOTICE 对于第一个房间, `centralSpawn` 的位置需要检测指定 */
+    const myRooms = getMyRooms()
+    if (myRooms.length === 1 && myRooms[0].controller.level === 1) {
+        const pos = myRooms[0].find(FIND_MY_SPAWNS)[0].pos;
+        (Memory as any)._plan = { [myRooms[0].name]: { 'centralSpawn': [ new RoomPosition(pos.x - 3, pos.y - 1, pos.roomName) ] } }
+    }
+
     P.register('unit', 'centralSpawn', new Unit([
         [Unit.STRUCTURE_ANY,    STRUCTURE_ROAD,                         STRUCTURE_ROAD,         STRUCTURE_ROAD,                         STRUCTURE_ROAD,         STRUCTURE_ROAD,                         Unit.STRUCTURE_ANY],
         [STRUCTURE_ROAD,        STRUCTURE_EXTENSION,                    STRUCTURE_EXTENSION,    [STRUCTURE_SPAWN, STRUCTURE_RAMPART],   STRUCTURE_EXTENSION,    STRUCTURE_EXTENSION,                    STRUCTURE_ROAD],
@@ -49,7 +57,4 @@ export function registerCommonConstructions() {
     P.register('road', 'centralSpawn => labUnit', 'centralSpawn', 'labUnit')
 
     P.register('unit', 'observer', new Unit([ [STRUCTURE_OBSERVER] ]), { distanceReferencesFrom: [ STRUCTURE_OBSERVER ], distanceReferencesTo: [ STRUCTURE_SPAWN ], roadRelationship: 'along'})
-
-    /** @NOTICE 对于第一个房间, `centralSpawn` 的位置需要手工指定 */
-    // (Memory as any)._plan = { 'E55S2': { 'centralSpawn': [ new RoomPosition(8, 23, 'E55S2') ] } }
 }

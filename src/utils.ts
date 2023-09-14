@@ -113,3 +113,7 @@ export function getUsedCapacity(structure: StorableStructure) {
     else
         return structure.store.getUsedCapacity()
 }
+
+export function getMyRooms() {
+    return _.filter(Game.rooms, room => room.controller && room.controller.my)
+}

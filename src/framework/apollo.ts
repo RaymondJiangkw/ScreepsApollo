@@ -958,19 +958,19 @@ class ResourceModule {
     /**
      * 查询资源预期状况
      */
-    #qeuryExpected(target: Id<StorableStructure>, resourceType: ResourceType) {
+    #queryExpected(target: Id<StorableStructure>, resourceType: ResourceType) {
         const manager = this.#getStructureResourceManager(target)
         return manager.getValue(resourceType)
     }
     /**
      * 查询资源实际状况
      */
-    #qeuryReal(target: Id<StorableStructure>, resourceType: ResourceType) {
+    #queryReal(target: Id<StorableStructure>, resourceType: ResourceType) {
         const manager = this.#getStructureResourceManager(target)
         return manager.getRealValue(resourceType)
     }
-    qeury(target: Id<StorableStructure>, resourceType: ResourceType) {
-        return Math.min(this.#qeuryExpected(target, resourceType), this.#qeuryReal(target, resourceType))
+    query(target: Id<StorableStructure>, resourceType: ResourceType) {
+        return Math.min(this.#queryExpected(target, resourceType), this.#queryReal(target, resourceType))
     }
     #room2ResourceSources: { [roomName: string]: { [resourceType in ResourceConstant]?: {
         ids: Id<StorableStructure>[], 
@@ -1011,11 +1011,12 @@ class ResourceModule {
     /**
      * 请求房间内资源的一个来源
      * @param requestPos 请求资源的发起方位置 - 用于选择来源
+     * @param autoWait 是否自动阻塞在房间资源信号量上
      */
-    requestSource(roomName: string, resourceType: ResourceConstant, requestPos?: RoomPosition): { code: StuckableAtomicFuncReturnCode, id: Id<StorableStructure> | null } {
+    requestSource(roomName: string, resourceType: ResourceConstant, requestPos?: RoomPosition, autoWait: boolean = true ): { code: StuckableAtomicFuncReturnCode, id: Id<StorableStructure> | null} {
         const candidates = this.#getResourceSourcesInRoom(roomName, resourceType).ids
         if ( candidates.length === 0 ) return {
-            code: Apollo.proc.signal.Swait({ signalId: this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId, lowerbound: 1, request: 0 }), 
+            code: autoWait ? Apollo.proc.signal.Swait({ signalId: this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId, lowerbound: 1, request: 0 }) : Apollo.proc.OK, 
             id: null, 
         }
         /** @TODO 优化路径查询 */
@@ -1030,7 +1031,7 @@ class ResourceModule {
         
         return {
             code: Apollo.proc.OK, 
-            id: _.max(candidates, id => this.qeury(id, resourceType))
+            id: _.max(candidates, id => this.query(id, resourceType))
         }
     }
     print(roomName: string) {
@@ -1039,7 +1040,7 @@ class ResourceModule {
             this.#room2ResourceSources[roomName][resouceType as ResourceConstant].ids.forEach(id => {
                 const structure = Game.getObjectById(id)
                 if ( !structure ) return
-                log(LOG_INFO, `${roomName} => ${resouceType}, ${structure}: ${this.#qeuryExpected(id, resouceType as ResourceConstant)} / ${this.#qeuryExpected(id, CAPACITY)}`)
+                log(LOG_INFO, `${roomName} => ${resouceType}, ${structure}: ${this.#queryExpected(id, resouceType as ResourceConstant)} / ${this.#queryExpected(id, CAPACITY)}`)
             })
         }
     }

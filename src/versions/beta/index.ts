@@ -1,6 +1,7 @@
 import { Apollo as A } from '@/framework/apollo'
 import { creepModule as C } from '@/modules/creep'
 import { planModule as P, Unit } from '@/modules/plan'
+import { transferModule as T } from '@/modules/transfer'
 import { assertWithMsg, getAvailableSurroundingPos, log, LOG_DEBUG, LOG_INFO } from '@/utils'
 import { registerCommonConstructions } from './config.construction'
 import { issueHarvestSource, registerHarvestSource } from './modules/harvestSource'
@@ -38,8 +39,8 @@ function getEnergy(roomName: string, getWorkerName: () => string, setWorkerName:
         }
 
         if ( targetId === null ) {
-            targetId = A.res.requestSource(roomName, RESOURCE_ENERGY, creep.pos).id
-            if ( !targetId || A.res.qeury(targetId, RESOURCE_ENERGY) <= 0 ) {
+            targetId = A.res.requestSource(roomName, RESOURCE_ENERGY, creep.pos, false).id
+            if ( !targetId || A.res.query(targetId, RESOURCE_ENERGY) <= 0 ) {
                 // Source 旁边的空位应当 > 1
                 const source = creep.pos.findClosestByRange(FIND_SOURCES, { filter: s => s.energy > 0 && getAvailableSurroundingPos(s.pos).length > 1 })
                 if ( source ) targetId = source.id
@@ -58,7 +59,7 @@ function getEnergy(roomName: string, getWorkerName: () => string, setWorkerName:
             if ( target.energy > 0 ) creep.harvest(target)
             else targetId = null
         } else {
-            const amount = Math.min(A.res.qeury(targetId as Id<StorableStructure>, RESOURCE_ENERGY), creep.store.getFreeCapacity(RESOURCE_ENERGY))
+            const amount = Math.min(A.res.query(targetId as Id<StorableStructure>, RESOURCE_ENERGY), creep.store.getFreeCapacity(RESOURCE_ENERGY))
             if ( amount > 0 ) {
                 assertWithMsg( A.res.request({ id: targetId as Id<StorableStructure>, resourceType: RESOURCE_ENERGY, amount }) === OK )
                 assertWithMsg( creep.withdraw(target, RESOURCE_ENERGY, amount) === OK )
@@ -135,7 +136,7 @@ function issueHarvestProc(roomName: string) {
             return A.proc.OK_STOP_CURRENT
         }
 
-        const spawns = Game.rooms[roomName].find<FIND_STRUCTURES, StructureSpawn | StructureExtension | StructureTower>(FIND_STRUCTURES, { filter: s => (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_EXTENSION || s.structureType === STRUCTURE_TOWER) && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && !isBelongingToQuickEnergyFilling(s.pos) })
+        const spawns = Game.rooms[roomName].find<FIND_STRUCTURES, StructureSpawn | StructureExtension | StructureTower>(FIND_STRUCTURES, { filter: s => (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_EXTENSION) && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && !isBelongingToQuickEnergyFilling(s.pos) })
 
         if ( spawns.length === 0 ) {
             /** 此时, 本进程无用, 释放资源并休眠 */
@@ -311,11 +312,15 @@ function issueRepairProc(roomName: string) {
 
 function issuePaintProc(roomName: string) {
     let workerName = null
+    let repairedPos: RoomPosition = null
 
-    function getPaintedPos() {
+    function getRepairedPos() {
         const structure = _.min(Game.rooms[roomName].find(FIND_STRUCTURES, { filter: s => s.hits < s.hitsMax && (s.structureType === STRUCTURE_RAMPART || s.structureType === STRUCTURE_WALL) }), s => s.hits / s.hitsMax)
         if ( !(structure instanceof Structure) ) return A.proc.STOP_SLEEP
-        else log(LOG_DEBUG, `发现需要刷墙的建筑 ${structure}`)
+        else {
+            log(LOG_DEBUG, `发现需要修理的建筑 ${structure}`)
+            repairedPos = structure.pos
+        }
         return A.proc.OK
     }
 
@@ -333,17 +338,17 @@ function issuePaintProc(roomName: string) {
             workerName = null
             return A.proc.OK
         }
-
-        const structure = _.min(Game.rooms[roomName].find(FIND_STRUCTURES, { filter: s => s.hits < s.hitsMax && (s.structureType === STRUCTURE_RAMPART || s.structureType === STRUCTURE_WALL) }), s => s.hits / s.hitsMax)
-
-        if ( !(structure instanceof Structure) ) {
-            C.release(name)
-            workerName = null
-            return [ A.proc.OK_STOP_CUSTOM, 'getPaintedPos' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
-        }
         
-        if ( creep.pos.roomName === roomName && creep.pos.getRangeTo(structure) <= 3 ) creep.repair(structure)
-        else creep.travelTo(structure)
+        if ( creep.pos.roomName === roomName && creep.pos.getRangeTo(repairedPos) <= 3 ) {
+            const structure = _.min(Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, repairedPos).filter(s => s.hits < s.hitsMax && (s.structureType === STRUCTURE_RAMPART || s.structureType === STRUCTURE_WALL)), s => s.hits / s.hitsMax)
+            if ( structure instanceof Structure ) creep.repair(structure)
+            else {
+                C.release(name)
+                workerName = null
+                repairedPos = null
+                return [ A.proc.OK_STOP_CUSTOM, 'getRepairedPos' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+            }
+        } else creep.travelTo(repairedPos)
 
         return A.proc.OK_STOP_CURRENT
     }
@@ -351,11 +356,11 @@ function issuePaintProc(roomName: string) {
     const gotoSource = getEnergy(roomName, () => workerName, name => workerName = name)
 
     const pid = A.proc.createProc([
-        ['getPaintedPos', () => getPaintedPos()], 
+        ['getRepairedPos', () => getRepairedPos()], 
         () => C.acquire('worker', roomName, name => workerName = name), 
         [ 'gotoSource', gotoSource ], 
         () => gotoStructure(workerName), 
-        [ 'JUMP', () => true, 'getPaintedPos' ]
+        [ 'JUMP', () => true, 'getRepairedPos' ]
     ], `${roomName} => Paint`)
 
     let lastTriggerTick = Game.time
@@ -373,16 +378,41 @@ function issueTowerProc(roomName: string) {
         () => P.exist(roomName, 'towers', 'tower'), 
         () => {
             if ( !Game.rooms[roomName] ) return [A.proc.STOP_ERR, `${roomName} 房间无视野`] as [ typeof A.proc.STOP_ERR, string ]
-            const towers = Game.rooms[roomName].find<FIND_STRUCTURES, StructureTower>(FIND_STRUCTURES, { filter: s => s.structureType === STRUCTURE_TOWER })
+            const towers = Game.rooms[roomName].find<FIND_STRUCTURES, StructureTower>(FIND_STRUCTURES, { filter: { structureType: STRUCTURE_TOWER } })
             if ( towers.length === 0 ) return [A.proc.STOP_ERR, `${roomName} 房间无可用 Tower`] as [ typeof A.proc.STOP_ERR, string ]
-            
-            for ( const creep of Game.rooms[roomName].find(FIND_HOSTILE_CREEPS) )
-                towers.forEach(t => t.attack(creep))
-            
-            for ( const creep of Game.rooms[roomName].find(FIND_MY_CREEPS) )
-                if ( creep.hits < creep.hitsMax )
-                    towers.forEach(t => t.heal(creep))
-            
+
+            const enemies = Game.rooms[roomName].find(FIND_HOSTILE_CREEPS)
+            const ramparts = Game.rooms[roomName].find(FIND_STRUCTURES, { filter: { structureType: STRUCTURE_RAMPART } }).filter(s => s.hits < 1e4)
+
+            towers.forEach(tower => {
+                if ( A.res.query(tower.id, RESOURCE_ENERGY) >= TOWER_ENERGY_COST  ) {
+                    if ( enemies.length > 0 ) {
+                        assertWithMsg( A.res.request({ id: tower.id, resourceType: RESOURCE_ENERGY, amount: TOWER_ENERGY_COST }) === A.proc.OK )
+                        A.timer.add(Game.time + 1, id => A.res.signal(id, A.res.CAPACITY, TOWER_ENERGY_COST), [ tower.id ], `更新塔 ${tower.id} 的容量`)
+                        tower.attack(enemies[0])
+                    } else if ( ramparts.length > 0 ) {
+                        assertWithMsg( A.res.request({ id: tower.id, resourceType: RESOURCE_ENERGY, amount: TOWER_ENERGY_COST }) === A.proc.OK )
+                        A.timer.add(Game.time + 1, id => A.res.signal(id, A.res.CAPACITY, TOWER_ENERGY_COST), [ tower.id ], `更新塔 ${tower.id} 的容量`)
+                        tower.repair( _.min(ramparts, rampart => rampart.hits) )
+                    }
+                }
+            })
+
+            towers.forEach(tower => {
+                if ( A.res.query(tower.id, A.res.CAPACITY) >= TOWER_CAPACITY / 2 ) {
+                    const requestedSource = A.res.requestSource(roomName, RESOURCE_ENERGY)
+                    if ( requestedSource.code === A.proc.OK ) {
+                        const sourceId = requestedSource.id
+                        const amount = Math.min(A.res.query(tower.id, A.res.CAPACITY), A.res.query(sourceId, RESOURCE_ENERGY))
+                        if ( amount > 0 ) {
+                            assertWithMsg( A.res.request({ id: tower.id, resourceType: A.res.CAPACITY, amount }) === A.proc.OK )
+                            assertWithMsg( A.res.request({ id: sourceId, resourceType: RESOURCE_ENERGY, amount }) === A.proc.OK )
+                            T.transfer( sourceId, tower.id, RESOURCE_ENERGY, amount )
+                        }
+                    }
+                }
+            })
+
             return A.proc.OK_STOP_CURRENT
         }
     ], `${roomName} => Tower`)
@@ -431,10 +461,12 @@ export function registerAll() {
         issueRepairProc(roomName)
         issuePaintProc(roomName)
         issueTowerProc(roomName)
-        
+
         /** Source Harvest 模块 */
-        issueHarvestSource(roomName, A.proc.signal.createSignal(0), () => [])
+        const targetLinkLists: Id<StructureLink>[] = [] // Source 处 Link 传递能量目标 Link 列表 & 信号量
+        const hasTargetLinkSignal = A.proc.signal.createSignal(0)
+        issueHarvestSource(roomName, () => targetLinkLists, hasTargetLinkSignal)
         /** Quick Energy Filling 模块 */
-        issueQuickEnergyFill(roomName)
+        issueQuickEnergyFill(roomName, () => targetLinkLists, hasTargetLinkSignal)
     }
 }
