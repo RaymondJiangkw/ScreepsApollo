@@ -395,9 +395,9 @@ class PlanModule {
                     for ( let i = 0; i < dlen; ++i ) {
                         if ( front.x + dx[i] < 0 || front.x + dx[i] >= this.ROOM_WIDTH || front.y + dy[i] < 0 || front.y + dy[i] >= this.ROOM_WIDTH ) continue
                         if ( this.#room2DistanceFromCenter[posU.roomName][front.x + dx[i]][front.y + dy[i]] !== -1 ) continue
-
+                        
+                        this.#room2DistanceFromCenter[posU.roomName][front.x + dx[i]][front.y + dy[i]] = front.dist + 1
                         if ( terrain.get(front.x + dx[i], front.y + dy[i]) !== TERRAIN_MASK_WALL ) {
-                            this.#room2DistanceFromCenter[posU.roomName][front.x + dx[i]][front.y + dy[i]] = front.dist + 1
                             Q.push({ x: front.x + dx[i], y: front.y + dy[i], dist: front.dist + 1 })
                         }
                     }

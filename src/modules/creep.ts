@@ -129,8 +129,11 @@ class CreepModule {
         const repo = this.#getRepo(type, roomName)
         if ( repo.lastCheckTick < Game.time ) {
             // 惰性检测: 是否有 Creep 消亡
-            _.forEach([...repo.ready], name => !(name in Game.creeps) && this.cancel(name))
-            _.forEach([...repo.busy], name => !(name in Game.creeps) && this.cancel(name))
+            for ( const name of [...repo.ready, ...repo.busy] )
+                if ( !(name in Game.creeps) )
+                    this.cancel(name)
+            // _.forEach([...repo.ready], name => !(name in Game.creeps) && this.cancel(name))
+            // _.forEach([...repo.busy], name => !(name in Game.creeps) && this.cancel(name))
             repo.lastCheckTick = Game.time
 
             // 消亡后判定: 是否需要生产新的 Creep
@@ -247,8 +250,17 @@ class CreepModule {
      * 注意: 注销时, 并不考虑再次 Spawn 以弥补空位的问题
      */
     cancel(name: string) {
+        log(LOG_DEBUG, `正在注销 Creep [${name}] ...`)
         /** 可能出现同一个 Creep 被两次 Cancel 的情况, 即周期性检查取消发生在前, 具体进程取消在后 */
-        if ( !(name in Memory.creeps) ) return 
+        if ( !(name in Memory.creeps) ) {
+            for ( const type in this.#repo ) {
+                for (const roomName in this.#repo[type]) {
+                    assertWithMsg(this.#repo[type][roomName].ready.indexOf(name) == -1, `${name} 消亡, 但是未在 Creep 数量管理模块 (ready) 中注销`)
+                    assertWithMsg(this.#repo[type][roomName].busy.indexOf(name) == -1, `${name} 消亡, 但是未在 Creep 数量管理模块 (busy) 中注销`)
+                }
+            }
+            return 
+        }
         if ( Memory.creeps[name].spawnType in this.#types ) {
             const repo = this.#getRepo(Memory.creeps[name].spawnType, Memory.creeps[name].spawnRoomName)
 
@@ -327,6 +339,31 @@ function calculateBodyCost(bodies: BodyPartConstant[]) {
     return cost
 }
 
+function groupBodyCost(bodies: BodyPartConstant[]) {
+    let cost = {}
+    for ( const body of bodies ) {
+        if ( !(body in cost) ) cost[body] = 0.
+        cost[body] += BODYPART_COST[body]
+    }
+    return cost
+}
+
+function reduceBody(energyAvailable: number, bodies: BodyPartConstant[]) {
+    const total_cost = calculateBodyCost(bodies)
+    const body2cost = groupBodyCost(bodies)
+    if ( total_cost <= energyAvailable ) return bodies
+    else {
+        const reduced_bodies = []
+        for ( const body of [ TOUGH, CARRY, MOVE, WORK, CLAIM, ATTACK, HEAL, RANGED_ATTACK ] ) {
+            if ( body in body2cost ) {
+                const num = Math.max(Math.floor(body2cost[body] * energyAvailable / total_cost / BODYPART_COST[body]), 1)
+                for ( let i = 0; i < num; ++i ) reduced_bodies.push(body)
+            }
+        }
+        return reduced_bodies
+    }
+}
+
 type RequestCreepType = {
     callback: (name: string) => void, 
     cost: number, 
@@ -334,6 +371,7 @@ type RequestCreepType = {
     requestTick: number, 
     memory?: CreepMemory, 
     workPos?: RoomPosition, 
+    strict: boolean, 
     requestId: string, 
 }
 
@@ -350,10 +388,10 @@ class CreepSpawnModule {
         }, [ creepName, callback ], `对于 Creep [${creepName}] 的出生注册`, CREEP_SPAWN_TIME)
     }
 
-    request(roomName: string, callback: (name: string) => void, body: BodyPartConstant[], priority: number, memory?: CreepMemory, workPos?: RoomPosition): void {
+    request(roomName: string, callback: (name: string) => void, body: BodyPartConstant[], priority: number, memory?: CreepMemory, workPos?: RoomPosition, strict: boolean = false): void {
         if ( !(roomName in this.#repo) ) this.#repo[roomName] = {}
         if ( !(priority in this.#repo[roomName]) ) this.#repo[roomName][priority] = []
-        this.#repo[roomName][priority].push({ callback, cost: calculateBodyCost(body), body, requestTick: Game.time, memory, workPos, requestId: generate_random_hex(32) })
+        this.#repo[roomName][priority].push({ callback, cost: calculateBodyCost(body), body, requestTick: Game.time, memory, workPos, requestId: generate_random_hex(32), strict })
     }
 
     #calRequestAmount(roomName: string): number {
@@ -400,15 +438,22 @@ class CreepSpawnModule {
                     
                     // 无论能量够不够, 都不再往后检查
                     flag = true
-                    if ( Game.rooms[roomName].energyAvailable >= order.cost ) {
+                    let cost = order.cost
+                    let bodies = order.body
+                    // 允许缩减规模时, 缩减能量
+                    if ( !order.strict ) {
+                        bodies = reduceBody(Game.rooms[roomName].energyAvailable, bodies)
+                        cost = calculateBodyCost(bodies)
+                    }
+                    if ( Game.rooms[roomName].energyAvailable >= cost ) {
                         let name = null
                         while ( !name || name in Game.creeps )
                             name = `${roomName}-${generate_random_hex(4)}`
-                        const spawnReturn = spawn.spawnCreep(order.body, name, {
+                        const spawnReturn = spawn.spawnCreep(bodies, name, {
                             memory: order.memory, 
                             directions: (order.workPos && spawn.pos.getRangeTo(order.workPos) <= 1)? [ spawn.pos.getDirectionTo(order.workPos) ] : undefined
                         })
-                        assertWithMsg(spawnReturn === OK, `生产 Creep [${order.body}; ${roomName}] 时, 选定的 Spawn [${spawn.id}] 无法成功生产 Creep (ERR Code: ${spawnReturn})`)
+                        assertWithMsg(spawnReturn === OK, `生产 Creep [${bodies}; ${roomName}] 时, 选定的 Spawn [${spawn.id}] 无法成功生产 Creep (ERR Code: ${spawnReturn})`)
                         this.issueRegisterAfterSpawn( name, order.callback )
                         // 删除成功 Spawn 的订单
                         _.remove(this.#repo[roomName][priority] as RequestCreepType[], o => o.requestId === order.requestId)

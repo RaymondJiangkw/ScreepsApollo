@@ -27,6 +27,7 @@ type TransferTaskDescription = {
     amount          : TransferAmount, 
     priority        : PriorityType, 
     afterSignalId?  : string, 
+    loseCallback?   : (amount: number, resourceType: ResourceConstant) => void, 
     finishWithdraw  : boolean, 
 }
 
@@ -34,6 +35,8 @@ interface TransferOpts {
     priority?: PriorityType
     /** 当可以获取该信号量时, 才开始进行转移 (但是会提前移动到目标地) */
     afterSignalId?: string
+    /** 当运输过程中丢失时, 触发回调函数 */
+    loseCallback?: (amount: number, resourceType: ResourceConstant) => void
 }
 
 type TransferTarget = Id<StorableStructure> | { id: Id<StorableStructure> | null, pos: Pos }
@@ -101,8 +104,13 @@ class TransferModule {
                             // 恢复任务
                             currentTransferTasks.forEach(task => {
                                 if ( task.id in targetDict && typeof task.amount === 'number' ) {
-                                    task.amount += targetDict[task.id].amount
-                                    task.finishWithdraw = false
+                                    // task.amount += targetDict[task.id].amount
+                                    if ( task.loseCallback ) task.loseCallback(targetDict[task.id].amount, targetDict[task.id].resourceType)
+                                    const to = Game.getObjectById(task.toId)
+                                    if ( !!to ) {
+                                        assertWithMsg( A.res.signal(task.toId, A.res.describeCapacity(to, task.resourceType), targetDict[task.id].amount) === A.proc.OK )
+                                        task.finishWithdraw = task.amount === 0
+                                    } else task.finishWithdraw = true
                                 }
                                 if ( !task.finishWithdraw ) {
                                     insertSortedBy(this.#getTaskQueue(roomName).queue, task, 'priority')
@@ -144,15 +152,21 @@ class TransferModule {
                     [ 'withdraw', () => {
                         const creep = Game.creeps[workerName]
                         /** 检测到错误, 立即释放资源 */
-                        if ( !creep ) {
+                        if ( !creep || creep.ticksToLive < 2 ) {
+                            if ( creep ) creep.suicide()
                             // 释放 Creep
                             C.cancel(workerName)
                             workerName = null
                             // 恢复任务
                             currentTransferTasks.forEach(task => {
                                 if ( task.id in targetDict && typeof task.amount === 'number' ) {
-                                    task.amount += targetDict[task.id].amount
-                                    task.finishWithdraw = false
+                                    // task.amount += targetDict[task.id].amount
+                                    if ( task.loseCallback ) task.loseCallback(targetDict[task.id].amount, targetDict[task.id].resourceType)
+                                    const to = Game.getObjectById(task.toId)
+                                    if ( !!to ) {
+                                        assertWithMsg( A.res.signal(task.toId, A.res.describeCapacity(to, task.resourceType), targetDict[task.id].amount) === A.proc.OK )
+                                        task.finishWithdraw = task.amount === 0
+                                    } else task.finishWithdraw = true
                                 }
                                 if ( !task.finishWithdraw ) {
                                     insertSortedBy(this.#getTaskQueue(roomName).queue, task, 'priority')
@@ -206,7 +220,7 @@ class TransferModule {
                             return [ A.proc.OK_STOP_CUSTOM, 'moveToSource' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
                         }
 
-                        creep.withdraw(source, resourceType, amount)
+                        assertWithMsg( creep.withdraw(source, resourceType, amount) === OK )
                         A.timer.add(Game.time + 1, (sourceId, capacityType, amount) => A.res.signal(sourceId, capacityType, amount), [source.id, A.res.describeCapacity(source, resourceType), amount], `取资源后, 更新源建筑的容量`)
                         targetDict[currentTransferTask.id] = { targetId: currentTransferTask.toId, targetPos: currentTransferTask.toPos, resourceType, amount }
 
@@ -219,15 +233,21 @@ class TransferModule {
                     ['moveToTarget', () => {
                         const creep = Game.creeps[workerName]
                         /** 检测到错误, 立即释放资源 */
-                        if ( !creep ) {
+                        if ( !creep || creep.ticksToLive < 2 ) {
+                            if ( creep ) creep.suicide()
                             // 释放 Creep
                             C.cancel(workerName)
                             workerName = null
                             // 恢复任务
                             currentTransferTasks.forEach(task => {
                                 if ( task.id in targetDict && typeof task.amount === 'number' ) {
-                                    task.amount += targetDict[task.id].amount
-                                    task.finishWithdraw = false
+                                    // task.amount += targetDict[task.id].amount
+                                    if ( task.loseCallback ) task.loseCallback(targetDict[task.id].amount, targetDict[task.id].resourceType)
+                                    const to = Game.getObjectById(task.toId)
+                                    if ( !!to ) {
+                                        assertWithMsg( A.res.signal(task.toId, A.res.describeCapacity(to, task.resourceType), targetDict[task.id].amount) === A.proc.OK )
+                                        task.finishWithdraw = task.amount === 0
+                                    } else task.finishWithdraw = true
                                 }
                                 if ( !task.finishWithdraw ) {
                                     insertSortedBy(this.#getTaskQueue(roomName).queue, task, 'priority')
@@ -254,7 +274,7 @@ class TransferModule {
                             }
 
                             const amount = Math.min(currentTarget.amount, creep.store[currentTarget.resourceType], target.store.getFreeCapacity(currentTarget.resourceType))
-                            creep.transfer(target, currentTarget.resourceType, amount)
+                            assertWithMsg( creep.transfer(target, currentTarget.resourceType, amount) === OK )
                             A.timer.add(Game.time + 1, (targetId, resourceType, amount) => A.res.signal(targetId, resourceType, amount), [target.id, currentTarget.resourceType, amount], `转移资源后, 更新目标建筑相应资源的数量`)
                             currentTarget.amount -= amount
                             if ( currentTarget.amount === 0 )
@@ -278,7 +298,7 @@ class TransferModule {
             })(workerName, currentTransferTasks, targetDict)
         }
     }
-    /** 在给定确切资源种类及数量时, 会一定完成; 无法完成, 则会不断重试 */
+    /** 在给定确切资源种类及数量时, 会一定完成; 无法完成, 则会调用回调函数 (可选) */
     transfer( from: TransferTarget, to: TransferTarget, resourceType: TransferResourceType, amount: TransferAmount, opts: TransferOpts = {} ): void {
         _.defaults(opts, { priority: PRIORITY_NORMAL })
         /** 规整参数 */
@@ -310,6 +330,7 @@ class TransferModule {
                     toId: to.id, toPos: to.pos, 
                     resourceType, amount, 
                     priority: opts.priority, afterSignalId: opts.afterSignalId, 
+                    loseCallback: opts.loseCallback, 
                     finishWithdraw: false, id: generate_random_hex(8), 
                 }
                 log(LOG_DEBUG, `运输任务 从 ${from.id} 到 ${to.id} 运输 ${resourceType} (${amount})`)

@@ -4,8 +4,8 @@
   "description": "Apollo AI for Screeps",
   "main": "index.js",
   "scripts": {
-    "push": "rollup -c --environment DEST:pserver",
-    "push-unofficial": "rollup -c --environment DEST:test", 
+    "push-private": "rollup -c --environment DEST:pserver",
+    "push": "rollup -c --environment DEST:main",
     "build": "rollup -c",
     "test-unit": "jest test/unit",
     "test-cover": "jest --coverage",

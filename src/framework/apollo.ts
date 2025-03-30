@@ -1,4 +1,5 @@
-import { assertWithMsg, generate_random_hex, log, LOG_DEBUG, LOG_ERR, LOG_INFO, LOG_PROFILE } from "@/utils"
+import { assertWithMsg, generate_random_hex, log, LOG_DEBUG, LOG_ERR, LOG_INFO, LOG_PROFILE, stackError } from "@/utils"
+import { sourceMappedStackTrace } from "@/modules/errorMapper"
 
 // -------------------------------------------------------------
 
@@ -395,7 +396,8 @@ class ProcessModule {
             if ( watchElement.lastTick === Game.time )
                 continue
             else {
-                assertWithMsg( watchElement.lastTick === Game.time - 1, `监视器中监视项目上一次被检查时间为 ${watchElement.lastTick}, 但应当为上一个 tick ${Game.time - 1}` )
+                if ( watchElement.lastTick !== Game.time - 1 )
+                    log(LOG_ERR, `监视器中监视项目上一次被检查时间为 ${watchElement.lastTick}, 但应当为上一个 tick ${Game.time - 1}` )
                 const lastValue = watchElement.lastValue
                 const thisValue = watchElement.func()
                 watchElement.lastTick = Game.time
@@ -425,7 +427,10 @@ class ProcessModule {
         /** 进程执行 */
         log(LOG_INFO, `开始运行进程, 进程池当前大小为 ${this.#processIdReadyQueue.length} ...`)
         // 校验当前没有正在运行的进程
-        assertWithMsg(this.#currentProcId === -1, `进程模块在 tick 开始时, 发现已有正在运行的进程 Id ${this.#currentProcId}`)
+        if ( this.#currentProcId !== -1 ) {
+            log(LOG_ERR, `进程模块在 tick 开始时, 发现已有正在运行的进程 Id ${this.#currentProcId}`)
+            this.#currentProcId = -1
+        }
         // 创建临时就绪进程 Id 队列
         const processIdReadyQueue = []
 
@@ -468,7 +473,24 @@ class ProcessModule {
                     if (Array.isArray(desc) && desc.length === 2) atomicFunc = desc[1]
                     else atomicFunc = desc
 
-                    const returnCode = atomicFunc()
+                    let returnCode = undefined
+                    try {
+                        returnCode = atomicFunc()
+                    } catch (e) {
+                        if ( e instanceof Error ) {
+                            const errorMessage = Game.rooms.sim
+                                ? `沙盒模式无法使用 source-map - 显示原始追踪栈<br>${_.escape(e.stack)}`
+                                : `${_.escape(sourceMappedStackTrace(e))}`;
+                            /** 输出 错误 */
+                            log(LOG_ERR, errorMessage)
+                            /** 存储 错误 到 Memory 中以备检查 */
+                            stackError(errorMessage)
+                            /** 发送 错误 到邮箱 */
+                            Game.notify(errorMessage)
+                        } else throw e
+                        returnCode = this.STOP_ERR
+                    }
+                    
                     if (returnCode === OK) {
                         // 顺序执行下一条原子函数
                         proc.pc++
@@ -917,7 +939,12 @@ class ResourceModule {
             return this.#structureDict[id]
         return this.#structureDict[id] = new StructureResourceManager(id)
     }
-    describeCapacity(structure: StorableStructure, resourceType: ResourceConstant) {
+    describeCapacity(structure: StorableStructure, resourceType: ResourceConstant | "all") {
+        if ( resourceType === "all" ) {
+            assertWithMsg( !(structure instanceof StructureLab || structure instanceof StructurePowerSpawn || structure instanceof StructureNuker) )
+            return CAPACITY
+        }
+
         if ( structure instanceof StructureLab || structure instanceof StructurePowerSpawn || structure instanceof StructureNuker )
             if ( resourceType === RESOURCE_ENERGY ) return CAPACITY_ENERGY
             else return CAPACITY_MINERAL
@@ -953,6 +980,10 @@ class ResourceModule {
         const manager = this.#getStructureResourceManager(target)
         const signalId = manager.getSignal(resourceType)
         log(LOG_DEBUG, `${target} 获得资源 ${resourceType} (${amount})`)
+        if ( Game.getObjectById(target) && Game.getObjectById(target).store[resourceType] < Apollo.proc.signal.getValue(signalId) + amount ) {
+            log(LOG_ERR, `${Game.getObjectById(target)} 应有 ${Apollo.proc.signal.getValue(signalId) + amount}, 但是实际上有 ${Game.getObjectById(target).store[resourceType]}`)
+            stackError(`${Game.getObjectById(target)} 应有 ${Apollo.proc.signal.getValue(signalId) + amount}, 但是实际上有 ${Game.getObjectById(target).store[resourceType]}`)
+        }
         return Apollo.proc.signal.Ssignal({ signalId, request: amount })
     }
     /**
@@ -1034,14 +1065,25 @@ class ResourceModule {
             id: _.max(candidates, id => this.query(id, resourceType))
         }
     }
-    print(roomName: string) {
-        if ( !(roomName in this.#room2ResourceSources) ) return
-        for ( const resouceType in this.#room2ResourceSources[roomName] ) {
-            this.#room2ResourceSources[roomName][resouceType as ResourceConstant].ids.forEach(id => {
-                const structure = Game.getObjectById(id)
-                if ( !structure ) return
-                log(LOG_INFO, `${roomName} => ${resouceType}, ${structure}: ${this.#queryExpected(id, resouceType as ResourceConstant)} / ${this.#queryExpected(id, CAPACITY)}`)
-            })
+    print(id: Id<Structure>, resourceType: ResourceConstant)
+    print(roomName: string)
+    print(arg1, arg2?) {
+        if ( arg2 === undefined ) {
+            const roomName = arg1
+            if ( !(roomName in this.#room2ResourceSources) ) return
+            for ( const resouceType in this.#room2ResourceSources[roomName] ) {
+                this.#room2ResourceSources[roomName][resouceType as ResourceConstant].ids.forEach(id => {
+                    const structure = Game.getObjectById(id)
+                    if ( !structure ) return
+                    log(LOG_INFO, `${roomName} => ${resouceType}, ${structure}: ${this.#queryExpected(id, resouceType as ResourceConstant)} / ${this.#queryExpected(id, CAPACITY)}`)
+                })
+            }
+        } else {
+            const id = arg1
+            const resourceType = arg2
+            const structure = Game.getObjectById(id)
+            if ( !structure ) return Apollo.timer.STOP
+            log(LOG_INFO, `${structure}: ${this.#queryExpected(id, resourceType)} / ${this.#queryExpected(id, CAPACITY)}`)
         }
     }
     private init() {

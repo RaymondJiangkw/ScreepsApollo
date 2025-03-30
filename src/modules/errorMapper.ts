@@ -29,7 +29,7 @@ const cache = {}
  * @param {Error | string} error 错误或原始追踪栈
  * @returns {string} 映射之后的源代码追踪栈
  */
-const sourceMappedStackTrace = function (error) {
+export const sourceMappedStackTrace = function (error) {
     const stack = error instanceof Error ? error.stack : error
     // 有缓存直接用
     if (cache.hasOwnProperty(stack)) return cache[stack]

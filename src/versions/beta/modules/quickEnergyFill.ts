@@ -115,6 +115,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
             const container = Game.rooms[pos.roomName].lookForAt(LOOK_STRUCTURES, pos.x, pos.y).filter(s => s.structureType === STRUCTURE_CONTAINER)[0]
             if ( !container ) return [A.proc.STOP_ERR, `${roomName} 的快速填充的 Container 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
             setContainerId(container.id as Id<StructureContainer>)
+            A.timer.add(Game.time + 1, id => A.res.print(id, RESOURCE_ENERGY), [container.id], `输出 [Container ${container.id}] 资源状态`, 1)
             return A.proc.OK
         }
     }
@@ -190,7 +191,10 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
             }
         } else {
             assertWithMsg( A.res.request({id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: energyGap}) === A.proc.OK )
-            T.transfer(requestedSource.id, containerId, RESOURCE_ENERGY, energyGap)
+            T.transfer(requestedSource.id, containerId, RESOURCE_ENERGY, energyGap, { loseCallback: (amount, resourceType) => {
+                containerEnergyGap.push(amount)
+                A.proc.signal.Ssignal({ signalId: containerEnergyGapSignal, request: 1 })
+            } })
         }
 
         if ( containerEnergyGap.length === 0 )
@@ -237,7 +241,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
             .map(s => s.structure)
             .filter((s: StorableStructure) => (s.structureType === STRUCTURE_EXTENSION || s.structureType === STRUCTURE_SPAWN) && s.store.getFreeCapacity(RESOURCE_ENERGY) > (issuedTransferFor[convertPosToString(s.pos)] || 0) )
             .sort((u: StorableStructure, v: StorableStructure) => (u.store.getFreeCapacity(RESOURCE_ENERGY) - (issuedTransferFor[convertPosToString(u.pos)] || 0)) - (v.store.getFreeCapacity(RESOURCE_ENERGY) - (issuedTransferFor[convertPosToString(v.pos)] || 0))) as (StructureSpawn | StructureExtension)[]
-        log(LOG_DEBUG, `${roomName} => 需要快速填充的建筑: ${structures}`)
+        log(LOG_DEBUG, `${roomName} => 需要快速填充的建筑: ${structures}; Top Pool [${A.proc.signal.getValue(TopSignal)}]: ${JSON.stringify(TopPool)}; Bottom Pool [${A.proc.signal.getValue(BottomSignal)}]: ${JSON.stringify(BottomPool)}`)
         /** 暂无 Structure 需要填充能量 */
         if ( structures.length === 0 ) return A.proc.STOP_SLEEP
         for ( const structure of structures ) {
@@ -354,7 +358,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
 
         const task = getCurrentTask()
         const fromTarget = Game.getObjectById(task.fromId)
-        if ( !fromTarget ) {
+        if ( !fromTarget || fromTarget.store[RESOURCE_ENERGY] === 0 ) {
             setCurrentTask(null)
             if ( Game.getObjectById(task.toId) )
                 issuedTransferFor[convertPosToString(Game.getObjectById(task.toId).pos)] -= (task.remainingAmount)
@@ -362,7 +366,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
         }
 
         const amount = Math.min(creep.store.getFreeCapacity(), task.remainingAmount, fromTarget.store[RESOURCE_ENERGY])
-        assertWithMsg( amount > 0 )
+        assertWithMsg( amount > 0, `${creep.store.getFreeCapacity()}, ${task.remainingAmount}, ${fromTarget.store[RESOURCE_ENERGY]}` )
         creep.withdraw(fromTarget, RESOURCE_ENERGY, amount)
         if ( fromTarget instanceof StructureContainer || fromTarget instanceof StructureLink )
             A.timer.add(Game.time + 1, (id, amount) => A.res.signal(id, A.res.CAPACITY, amount), [task.fromId, amount], `${task.fromId} 容量更新`)
@@ -405,7 +409,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
 
         if ( toTarget.store.getFreeCapacity(RESOURCE_ENERGY) > 0 ) {
             const amount = Math.min(task.currentAmount, toTarget.store.getFreeCapacity(RESOURCE_ENERGY))
-            creep.transfer(toTarget, RESOURCE_ENERGY, amount)
+            assertWithMsg( creep.transfer(toTarget, RESOURCE_ENERGY, amount) === OK )
             if ( toTarget instanceof StructureContainer )
                 A.timer.add(Game.time + 1, (id, amount) => A.res.signal(id, RESOURCE_ENERGY, amount), [task.toId, amount], `${task.toId} 能量资源更新`)
             else
@@ -432,6 +436,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
     }
 
     A.proc.createProc([
+        () => P.exist(roomName, unitName, tagLeftContainer), 
         () => C.acquire('quickFiller0', roomName, name => leftTopFillerName = name, new RoomPosition(posLeftTopWorker.x, posLeftTopWorker.y, posLeftTopWorker.roomName)), 
         () => runCreepDrop( () => leftTopFillerName, name => leftTopFillerName = name ), 
         () => runCreepMoveTo( () => leftTopFillerName, name => leftTopFillerName = name, posLeftTopWorker ), 
@@ -441,6 +446,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
     ], `${roomName} => Quick Filler (Left Top)`)
 
     A.proc.createProc([
+        () => P.exist(roomName, unitName, tagLeftContainer), 
         () => C.acquire('quickFiller1', roomName, name => leftBottomFillerName = name, new RoomPosition(posLeftBottomWorker.x, posLeftBottomWorker.y, posLeftBottomWorker.roomName)), 
         () => runCreepDrop( () => leftBottomFillerName, name => leftBottomFillerName = name ), 
         () => runCreepMoveTo( () => leftBottomFillerName, name => leftBottomFillerName = name, posLeftBottomWorker ), 
@@ -450,6 +456,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
     ], `${roomName} => Quick Filler (Left Bottom)`)
 
     A.proc.createProc([
+        () => P.exist(roomName, unitName, tagRightContainer), 
         () => C.acquire('quickFiller2', roomName, name => rightTopFillerName = name, new RoomPosition(posRightTopWorker.x, posRightTopWorker.y, posRightTopWorker.roomName)), 
         () => runCreepDrop( () => rightTopFillerName, name => rightTopFillerName = name ), 
         () => runCreepMoveTo( () => rightTopFillerName, name => rightTopFillerName = name, posRightTopWorker ), 
@@ -459,6 +466,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
     ], `${roomName} => Quick Filler (Right Top)`)
 
     A.proc.createProc([
+        () => P.exist(roomName, unitName, tagRightContainer), 
         () => C.acquire('quickFiller3', roomName, name => rightBottomFillerName = name, new RoomPosition(posRightBottomWorker.x, posRightBottomWorker.y, posRightBottomWorker.roomName)), 
         () => runCreepDrop( () => rightBottomFillerName, name => rightBottomFillerName = name ), 
         () => runCreepMoveTo( () => rightBottomFillerName, name => rightBottomFillerName = name, posRightBottomWorker ), 

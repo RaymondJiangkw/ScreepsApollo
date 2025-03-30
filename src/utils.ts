@@ -32,6 +32,14 @@ export function log(level: LOG_LEVEL, ...args): void {
 
 // ----------------------------------------------------------------
 
+export function stackError(message: string): void {
+    if ( !('_err' in Memory) ) (Memory as any)._err = [];
+    // if ( (Memory as any)._err.indexOf(message) === -1 )
+    (Memory as any)._err.push(message)
+}
+
+// ----------------------------------------------------------------
+
 export const generate_random_hex = (size: number) => [...Array(size)].map(() => Math.floor(Math.random() * 16).toString(16)).join('')
 
 // ----------------------------------------------------------------
