@@ -102,6 +102,8 @@ interface PlanModuleRegisterUnitOpts {
     on?: Pos
     /** 是否在某个特殊的建筑周围 */
     aroundRelationship? : Pos
+    /** 是否远离某个特殊的建筑 (range > 2) */
+    awayRelationship? : (StructureConstant | 'sources' | 'mineral')[]
     /** 规划的本建筑单元数量 */
     amount? : number, 
     /** 不对该区域保护 */
@@ -489,9 +491,26 @@ class PlanModule {
                         let flag = false
                         for (let dx = 0; dx < unit.width; ++dx) {
                             for (let dy = 0; dy < unit.height; ++dy) {
+                                // 已被占用
                                 if ( this.#getUsedRoomPos(roomName)[x + dx][y + dy] !== 'free' ) {
                                     flag = true
                                     break
+                                }
+                                // 禁止环绕
+                                if ( !!opts.awayRelationship ) {
+                                    for ( const type of opts.awayRelationship ) {
+                                        const awayPos = []
+                                        if ( type === "sources" ) awayPos.push(...Game.rooms[roomName].find(FIND_SOURCES).map(s => s.pos))
+                                        else if ( type === "mineral" ) awayPos.push(...Game.rooms[roomName].find(FIND_MINERALS).map(m => m.pos))
+                                        else if ( type === STRUCTURE_CONTROLLER || type === STRUCTURE_EXTRACTOR ) awayPos.push(...Game.rooms[roomName].find(FIND_STRUCTURES, { filter: { structureType: type } }).map(s => s.pos))
+                                        else awayPos.push(...this.#getRoomStructure2Pos(roomName, type))
+                                        for ( const pos of awayPos ) {
+                                            if ( Math.max(Math.abs(x + dx - pos.x), Math.abs(y + dy - pos.y)) <= 2 ) {
+                                                flag = true
+                                                break
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             if ( flag ) break
@@ -1029,7 +1048,7 @@ class PlanModule {
                         const info = this.#constructionSite2Info[convertPosToString(pos)]
                         if ( info.tag.length === 0 ) return
                         // 校验建筑确实存在
-                        assertWithMsg( Game.rooms[info.pos.roomName]? true : false )
+                        assertWithMsg( !!Game.rooms[info.pos.roomName], `${info.pos.roomName} 应当可视` )
                         const structure = Game.rooms[info.pos.roomName].lookForAt(LOOK_STRUCTURES, new RoomPosition(info.pos.x, info.pos.y, info.pos.roomName)).filter(s => s.structureType === info.structureType)[0]
                         if ( !structure )
                             log(LOG_ERR, `期望在 ${convertPosToString(info.pos)} 找到建筑 ${info.structureType}, 但是没有找到`)

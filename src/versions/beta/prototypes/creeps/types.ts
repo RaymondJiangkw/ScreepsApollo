@@ -42,6 +42,7 @@ interface TravelToOptions {
     route?: {[roomName: string]: boolean};
     ensurePath?: boolean;
     flee?: boolean;
+    avoidStructureTypes?: StructureConstant[];
 }
 
 interface TravelData {

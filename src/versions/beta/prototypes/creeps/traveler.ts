@@ -251,6 +251,7 @@ export class Traveler {
             maxOps: DEFAULT_MAXOPS, 
             range: 1, 
             flee: false, 
+            avoidStructureTypes: []
         });
 
         if (options.movingTarget) {
@@ -294,9 +295,9 @@ export class Traveler {
                         Traveler.addCreepsToMatrix(room, matrix);
                     }
                 } else if (options.ignoreCreeps || roomName !== originRoomName) {
-                    matrix = this.getStructureMatrix(room, options.freshMatrix);
+                    matrix = this.getStructureMatrix(room, options.freshMatrix, options.avoidStructureTypes);
                 } else {
-                    matrix = this.getCreepMatrix(room);
+                    matrix = this.getCreepMatrix(room, options.avoidStructureTypes);
                 }
 
                 if (options.obstacles) {
@@ -459,11 +460,11 @@ export class Traveler {
      * @returns {any}
      */
 
-    public static getStructureMatrix(room: Room, freshMatrix?: boolean): CostMatrix {
+    public static getStructureMatrix(room: Room, freshMatrix?: boolean, avoidStructureTypes?: StructureConstant[]): CostMatrix {
         if (!this.structureMatrixCache[room.name] || (freshMatrix && Game.time !== this.structureMatrixTick)) {
             this.structureMatrixTick = Game.time;
             let matrix = new PathFinder.CostMatrix();
-            this.structureMatrixCache[room.name] = Traveler.addStructuresToMatrix(room, matrix, 1);
+            this.structureMatrixCache[room.name] = Traveler.addStructuresToMatrix(room, matrix, 1, avoidStructureTypes);
         }
         return this.structureMatrixCache[room.name];
     }
@@ -474,11 +475,11 @@ export class Traveler {
      * @returns {any}
      */
 
-    public static getCreepMatrix(room: Room) {
+    public static getCreepMatrix(room: Room, avoidStructureTypes?: StructureConstant[]) {
         if (!this.creepMatrixCache[room.name] || Game.time !== this.creepMatrixTick) {
             this.creepMatrixTick = Game.time;
             this.creepMatrixCache[room.name] = Traveler.addCreepsToMatrix(room,
-                this.getStructureMatrix(room, true).clone());
+                this.getStructureMatrix(room, true, avoidStructureTypes).clone());
         }
         return this.creepMatrixCache[room.name];
     }
@@ -491,10 +492,14 @@ export class Traveler {
      * @returns {CostMatrix}
      */
 
-    public static addStructuresToMatrix(room: Room, matrix: CostMatrix, roadCost: number): CostMatrix {
+    public static addStructuresToMatrix(room: Room, matrix: CostMatrix, roadCost: number, avoidStructureTypes?: StructureConstant[]): CostMatrix {
 
         let impassibleStructures: Structure[] = [];
         for (let structure of room.find(FIND_STRUCTURES)) {
+            if ( avoidStructureTypes && avoidStructureTypes.length > 0 && _.includes(avoidStructureTypes, structure.structureType) ) {
+                impassibleStructures.push(structure);
+                continue;
+            }
             if (structure instanceof StructureRampart) {
                 if (!structure.my && !structure.isPublic) {
                     impassibleStructures.push(structure);

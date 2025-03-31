@@ -1,4 +1,4 @@
-import { assertWithMsg, generate_random_hex, log, LOG_DEBUG, LOG_ERR, LOG_INFO, LOG_PROFILE, stackError } from "@/utils"
+import { assertWithMsg, generate_random_hex, log, LOG_DEBUG, LOG_ERR, LOG_INFO, LOG_PROFILE, stackError, stackLog } from "@/utils"
 import { sourceMappedStackTrace } from "@/modules/errorMapper"
 
 // -------------------------------------------------------------
@@ -566,8 +566,10 @@ class ProcessModule {
             }
 
             proc.updateCpuCost(Game.cpu.getUsed() - startCpuTime)
-            log(LOG_PROFILE, `🔄 进程 [${proc.description}] 消耗 ${proc.getCpuCost().toFixed(2)}`)
+            log(LOG_PROFILE, `🔄 进程 [${proc.description}] 消耗 ${proc.getCpuCost().toFixed(2)}, 停止在 ${proc.pc}.`)
         }
+        log(LOG_DEBUG, `休眠进程池: ${this.#processIdSleepQueue.map(id => "[" + this.#procDict[id].description + "," + this.#procDict[id].pc.toString() + "]")} ...`)
+        log(LOG_DEBUG, `阻塞进程池: ${this.#processIdStuckQueue.map(id => "[" + this.#procDict[id].description + "," + this.#procDict[id].pc.toString() + "]")} ...`)
         // 将进程模块的就绪进程 Id 队列指向临时变量
         this.#processIdReadyQueue = processIdReadyQueue
         // 更新上一次调用函数的时间
@@ -900,7 +902,7 @@ class StructureResourceManager {
 
         // 初次注册, 登记所有目前已知的建筑
         const structure = Game.getObjectById(id)
-        assertWithMsg( structure? true : false )
+        assertWithMsg( !!structure, `注册 ${id} 资源管理时, 建筑应当必定存在` )
         for ( const resourceType in structure.store )
             this.getSignal(resourceType as ResourceConstant)
         
@@ -958,9 +960,12 @@ class ResourceModule {
      * 
      * @atom 只能在进程流程中运行使用
      */
-    request(target: RequestDescriptor | RequestDescriptor[]): StuckableAtomicFuncReturnCode {
+    request(target: RequestDescriptor | RequestDescriptor[], msg?: string): StuckableAtomicFuncReturnCode {
         /** 规整参数 */
         if (!Array.isArray(target)) target = [ target ]
+
+        // for ( const v of target )
+        //     stackLog(`${msg} 请求 ${v.id} ${JSON.stringify(parseAmountDescriptor(v.amount))} ${v.resourceType}.`)
 
         return Apollo.proc.signal.Swait(
             ...target.map(v => ( {
@@ -1001,7 +1006,8 @@ class ResourceModule {
         return manager.getRealValue(resourceType)
     }
     query(target: Id<StorableStructure>, resourceType: ResourceType) {
-        return Math.min(this.#queryExpected(target, resourceType), this.#queryReal(target, resourceType))
+        assertWithMsg( this.#queryExpected(target, resourceType) <= this.#queryReal(target, resourceType), `${target} 应有 ${this.#queryExpected(target, resourceType)} 但是实际有 ${this.#queryReal(target, resourceType)}.` )
+        return this.#queryExpected(target, resourceType)
     }
     #room2ResourceSources: { [roomName: string]: { [resourceType in ResourceConstant]?: {
         ids: Id<StorableStructure>[], 
@@ -1177,3 +1183,4 @@ class ApolloKernel {
 
 export const Apollo = new ApolloKernel();
 (Apollo.res as any).init()
+global.A = Apollo

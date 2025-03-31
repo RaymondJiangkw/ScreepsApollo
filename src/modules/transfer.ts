@@ -88,6 +88,11 @@ class TransferModule {
                         }
                         if ( creep.store.getUsedCapacity() === 0 ) return A.proc.OK
                         for ( const resourceType in creep.store ) {
+                            // Drop 在 Container 上会影响资源计算
+                            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(v => v.structureType === STRUCTURE_CONTAINER).length > 0 ) {
+                                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                                return A.proc.OK_STOP_CURRENT
+                            }
                             creep.drop(resourceType as ResourceConstant)
                             return A.proc.OK_STOP_CURRENT
                         }
@@ -101,7 +106,8 @@ class TransferModule {
                             // 释放 Creep
                             C.cancel(workerName)
                             workerName = null
-                            // 恢复任务
+                            // 恢复任务, 不用恢复 `from` 的资源, 因为运输一定完成
+                            // 相应的资源一定被消耗
                             currentTransferTasks.forEach(task => {
                                 if ( task.id in targetDict && typeof task.amount === 'number' ) {
                                     // task.amount += targetDict[task.id].amount
@@ -199,7 +205,7 @@ class TransferModule {
                                 currentTransferTasks.shift()
                                 return [ A.proc.OK_STOP_CUSTOM, 'moveToSource' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
                             }
-                            assertWithMsg( currentTransferTask.amount === 'all' )
+                            assertWithMsg( currentTransferTask.amount === 'all', `当运输资源为 all 时, 运输数量也应当为 all. 但实际是 ${currentTransferTask.amount}.` )
                             resourceType = Object.keys(source.store)[0] as ResourceConstant
                             amount = Math.min(source.store[resourceType], creep.store.getFreeCapacity())
                             if ( Object.keys(source.store).length === 1 && amount === source.store[resourceType] )
@@ -298,7 +304,7 @@ class TransferModule {
             })(workerName, currentTransferTasks, targetDict)
         }
     }
-    /** 在给定确切资源种类及数量时, 会一定完成; 无法完成, 则会调用回调函数 (可选) */
+    /** 在给定确切资源种类及数量时, 会一定完成; 无法完成, 则会调用回调函数 (可选). 运输资源时, 应提前 request. */
     transfer( from: TransferTarget, to: TransferTarget, resourceType: TransferResourceType, amount: TransferAmount, opts: TransferOpts = {} ): void {
         _.defaults(opts, { priority: PRIORITY_NORMAL })
         /** 规整参数 */
@@ -382,7 +388,7 @@ class TransferModule {
         return { queueId, queue: this.#takeOverInfo[queueId].queue, lengthSignalId: this.#takeOverInfo[queueId].lengthSignalId }
     }
     bindTakeOver( queueId: string, token: 'from' | 'to', structureId: Id<StorableStructure> ) {
-        assertWithMsg( queueId in this.#takeOverInfo )
+        assertWithMsg( queueId in this.#takeOverInfo, `transfer -> 386` )
         if ( token === 'from' )
             this.#takeOverInfo[queueId].fromIds.push(structureId)
         else if ( token === 'to' )
@@ -404,3 +410,4 @@ class TransferModule {
 }
 
 export const transferModule = new TransferModule()
+global.T = transferModule

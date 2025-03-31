@@ -5,7 +5,7 @@
 import { Apollo as A } from "@/framework/apollo"
 import { planModule as P } from "@/modules/plan"
 import { creepModule as C } from "@/modules/creep"
-import { assertWithMsg, getAvailableSurroundingPos, log, LOG_ERR, LOG_INFO } from "@/utils"
+import { assertWithMsg, calcBodyEffectiveness, getAvailableSurroundingPos, log, LOG_DEBUG, LOG_ERR, LOG_INFO } from "@/utils"
 
 /** 管理 Source 附近的建筑 */
 type SourceRelevantStructures = {
@@ -87,7 +87,7 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         
         /** 即将消亡, 则逃离原位置 */
         if ( creep.ticksToLive <= 1 ) {
-            creep.travelTo( source, { flee: true, ignoreCreeps: false, range: 2 } )
+            creep.travelTo( source, { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
             return A.proc.OK_STOP_CURRENT
         }
         
@@ -103,7 +103,7 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         }
 
         /** 采集满 或 无可采集 或 采集溢出 */
-        if ( creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0 || source.energy === 0 || creep.store.getUsedCapacity(RESOURCE_ENERGY) + 2 * _.countBy(creep.body, 'type')[WORK] > CARRY_CAPACITY ) return A.proc.OK
+        if ( creep.store.getFreeCapacity(RESOURCE_ENERGY) < calcBodyEffectiveness(creep.body, WORK, 'harvest', HARVEST_POWER) || source.energy === 0 ) return A.proc.OK
 
         creep.harvest(source)
 
@@ -181,8 +181,8 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         const containerPos = new RoomPosition(info()[STRUCTURE_CONTAINER].pos.x, info()[STRUCTURE_CONTAINER].pos.y, roomName)
 
         /** 即将消亡, 则逃离原位置 */
-        if ( creep.ticksToLive <= 1 ) {
-            creep.travelTo( containerPos, { flee: true, ignoreCreeps: false, range: 1 } )
+        if ( creep.ticksToLive < 2 || creep.hits < creep.hitsMax ) {
+            creep.travelTo( containerPos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
             return A.proc.OK_STOP_CURRENT
         }
 
@@ -216,8 +216,9 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         // -> Transfer 到 Container 中
         if ( A.res.query(info()[STRUCTURE_CONTAINER].id, A.res.CAPACITY) > 0 ) {
             const amount = Math.min(A.res.query(info()[STRUCTURE_CONTAINER].id, A.res.CAPACITY), creep.store.getUsedCapacity(RESOURCE_ENERGY))
-            assertWithMsg( A.res.request({ id: info()[STRUCTURE_CONTAINER].id, resourceType: A.res.CAPACITY, amount }) === A.proc.OK )
-            assertWithMsg( creep.transfer(Game.getObjectById(info()[STRUCTURE_CONTAINER].id), RESOURCE_ENERGY, amount) === OK )
+            assertWithMsg( A.res.request({ id: info()[STRUCTURE_CONTAINER].id, resourceType: A.res.CAPACITY, amount }, `issueHarvestSourceProc -> 219`) === A.proc.OK, `无法申请 ${info()[STRUCTURE_CONTAINER].id} ${amount} 容量.` )
+            assertWithMsg( creep.transfer(Game.getObjectById(info()[STRUCTURE_CONTAINER].id), RESOURCE_ENERGY, amount) === OK, `${creep} 无法传输 ${amount} 能量 到 ${info()[STRUCTURE_CONTAINER].id}` )
+            log(LOG_DEBUG, `${info()[STRUCTURE_CONTAINER].id} 实有 ${Game.getObjectById(info()[STRUCTURE_CONTAINER].id).store[RESOURCE_ENERGY]}, 应有 ${A.res.query(info()[STRUCTURE_CONTAINER].id, RESOURCE_ENERGY)}.`)
             A.timer.add(Game.time + 1, (id, amount) => A.res.signal(id, RESOURCE_ENERGY, amount), [info()[STRUCTURE_CONTAINER].id, amount], `更新 ${info()[STRUCTURE_CONTAINER].id} 的 energy 数量`)
             return A.proc.OK_STOP_NEXT
         } else return A.proc.OK_STOP_CURRENT // 不能阻塞在容量上, 因为可能要修理 Container
@@ -254,7 +255,7 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
 
         /** 即将消亡, 则逃离原位置 */
         if ( creep.ticksToLive <= 1 ) {
-            creep.travelTo( repairPos, { flee: true, ignoreCreeps: false, range: 1 } )
+            creep.travelTo( repairPos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
             return A.proc.OK_STOP_CURRENT
         }
 
@@ -309,8 +310,8 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         if ( destinationLinkIds.length > 0 ) {
             const choice = _.min( destinationLinkIds, id => A.res.query(id, RESOURCE_ENERGY) )
             const amount = Math.max(Math.min(Math.floor(link.store.getUsedCapacity(RESOURCE_ENERGY) / (1 + LINK_LOSS_RATIO)), A.res.query(choice, A.res.CAPACITY)), 1) // 未验证为 1 的情况下的行为
-            assertWithMsg(A.res.request({ id: choice, resourceType: A.res.CAPACITY, amount }) === A.proc.OK)
-            assertWithMsg(link.transferEnergy(Game.getObjectById(choice), amount) === OK)
+            assertWithMsg(A.res.request({ id: choice, resourceType: A.res.CAPACITY, amount }, `issueHarvestSourceProc -> 313`) === A.proc.OK, `无法申请 ${choice} ${amount} 容量.`)
+            assertWithMsg(link.transferEnergy(Game.getObjectById(choice), amount) === OK, `${link} 无法传输 ${amount} 能量到 ${choice}.`)
             A.timer.add(Game.time + 1, (id, amount) => A.res.signal(id, RESOURCE_ENERGY, amount), [choice, amount], `Link ${linkId} -> Link ${choice} 后能量更新`)
             return A.proc.OK_STOP_CURRENT
         } else return A.proc.OK_STOP_CURRENT // [ A.proc.OK_STOP_CUSTOM, 'CapacitySwait' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
@@ -333,5 +334,5 @@ export function issueHarvestSource( roomName: string, getDestinationLinks: () =>
         if ( sourceUnit.isSourceFit(source.id) )
             issueHarvestSourceProc(roomName, source.id, source.pos, getDestinationLinks,  destinationLinksReadySignalId)
         else
-            log(LOG_INFO, `无法为 ${source} 创建采集方法`)
+            log(LOG_ERR, `无法为 ${source} 创建采集方法`)
 }

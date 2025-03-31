@@ -1,6 +1,15 @@
+export function getFileNameAndLineNumber() {
+    const e = new Error();
+    const regex = /\((.*):(\d+):(\d+)\)$/
+    const match = regex.exec(e.stack.split("\n")[2]);
+    return `${match[1]}:${match[2]}:${match[3]}`;
+}
+
 export function assertWithMsg(condition: boolean, message: string = 'Assert 时发生错误'): void {
-    if ( !condition )
-        throw new Error(message)
+    if ( !condition ) {
+        log(LOG_ERR, message)
+        stackError(Game.time + ": " + message)
+    }
 }
 
 export function raiseNotImplementedError() {
@@ -36,6 +45,12 @@ export function stackError(message: string): void {
     if ( !('_err' in Memory) ) (Memory as any)._err = [];
     // if ( (Memory as any)._err.indexOf(message) === -1 )
     (Memory as any)._err.push(message)
+}
+
+export function stackLog(message: string): void {
+    if ( !('_log' in Memory) ) (Memory as any)._log = [];
+    // if ( (Memory as any)._err.indexOf(message) === -1 )
+    (Memory as any)._log.push(message)
 }
 
 // ----------------------------------------------------------------
@@ -124,4 +139,19 @@ export function getUsedCapacity(structure: StorableStructure) {
 
 export function getMyRooms() {
     return _.filter(Game.rooms, room => room.controller && room.controller.my)
+}
+
+export function calcBodyEffectiveness(body: BodyPartDefinition[], bodyPartType: BodyPartConstant, methodName: string, basePower: number) {
+    let power = 0
+    body.forEach(i => {
+        if(!(i.hits) || i.type != bodyPartType)
+            return
+        
+        let iPower = basePower
+        if(i.boost && BOOSTS[bodyPartType][i.boost] && BOOSTS[bodyPartType][i.boost][methodName]) {
+            iPower *= BOOSTS[bodyPartType][i.boost][methodName]
+        }
+        power += iPower
+    })
+    return power
 }

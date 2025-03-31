@@ -62,6 +62,8 @@ class CreepModule {
     PRIORITY_NORMAL = PRIORITY_NORMAL
     /** 生产 Creep 特权级别 —— 随意 */
     PRIORITY_CASUAL = PRIORITY_CASUAL
+    /** 可用 Creep 最少尚存 Ticks */
+    MINIMUM_TICKS_TO_LIVE = 0
     #emaBeta: number = 0.9
     #context: CreepModuleContext
     #types: { [type: string]: { [controllerLevel: string]: {body: BodyPartConstant[], amount: number | 'auto', priority: number} } } = {}
@@ -137,12 +139,13 @@ class CreepModule {
             repo.lastCheckTick = Game.time
 
             // 消亡后判定: 是否需要生产新的 Creep
-            this.#replenish(type, roomName)
+            this.#replenish(type, roomName, workPos)
         }
         
-        if ( repo.ready.length > 0 ) {
+        if ( _.filter(repo.ready, creepName => Game.creeps[creepName] && Game.creeps[creepName].ticksToLive > this.MINIMUM_TICKS_TO_LIVE).length > 0 ) {
             // 此时有可用的 Creep
-            const name = _.sortBy( repo.ready, creepName => Game.creeps[creepName].pos.roomName !== roomName? Infinity : ( workPos? Game.creeps[creepName].pos.getRangeTo(workPos) : 0 ) )[0]
+            const name = _.sortBy( _.filter(repo.ready, creepName => Game.creeps[creepName] && Game.creeps[creepName].ticksToLive > this.MINIMUM_TICKS_TO_LIVE), creepName => Game.creeps[creepName].pos.roomName !== roomName? Infinity : ( workPos? Game.creeps[creepName].pos.getRangeTo(workPos) : 0 ) )[0]
+            assertWithMsg( typeof name === "string", `${roomName} => ${type} 匹配到的 creep 无效! 所有可用 creeps: ${JSON.stringify(repo.ready)}` )
             assertWithMsg( A.proc.signal.Swait({ signalId: repo.signalId, lowerbound: 1, request: 1 }) === OK, `申请 模块型号 '${type}', 管辖房间 '${roomName}' 的 Creep 时, 管理闲置数量的信号量数值与闲置数量不匹配` )
             _.remove( repo.ready, v => v === name )
             repo.busy.push(name)
@@ -151,7 +154,7 @@ class CreepModule {
         } else {
             const ret = A.proc.signal.Swait({ signalId: repo.signalId, lowerbound: 1, request: 1 })
             // 请求时判定: 是否需要生产新的 Creep
-            this.#replenish(type, roomName)
+            this.#replenish(type, roomName, workPos)
             return ret
         }
     }
@@ -172,6 +175,14 @@ class CreepModule {
         repo.ready.push(name)
         // 更新信号量
         A.proc.signal.Ssignal({ signalId: repo.signalId, request: 1 })
+        // 移动 creep 到空闲位置
+        A.timer.add(Game.time + 1, creepName => {
+            const creep = Game.creeps[creepName]
+            if ( !creep ) return A.timer.STOP
+            if ( _.includes(repo.busy, creep.name) ) return A.timer.STOP
+            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length === 0 ) return A.timer.STOP
+            creep.travelTo(creep.pos, { flee: true, ignoreCreeps: false, offRoad: true, avoidStructureTypes: [ STRUCTURE_CONTAINER, STRUCTURE_ROAD ] })
+        }, [ creep.name ], `闲置 ${creep}`, 1)
 
         return OK
     }
@@ -220,12 +231,12 @@ class CreepModule {
     }
 
     /** 补充特定型号的 Creep 数量 (不检查是否有 Creep 应当消亡) */
-    #replenish(type: string, roomName: string) {
+    #replenish(type: string, roomName: string, workPos?: RoomPosition) {
         const repo = this.#getRepo(type, roomName)
         const currentAmount = repo.ready.length + repo.busy.length + repo.spawning
         const expectedAmount = this.#getExpectedAmount(type, roomName)
         log(LOG_DEBUG, `检查管辖房间 ${roomName}, 型号 ${type} Creep: ${currentAmount}/${expectedAmount}`)
-        for ( let i = 0; i < expectedAmount - currentAmount; ++i ) this.#issue(type, roomName)
+        for ( let i = 0; i < expectedAmount - currentAmount; ++i ) this.#issue(type, roomName, workPos)
     }
     
     /**
@@ -243,6 +254,15 @@ class CreepModule {
         assertWithMsg(!_.includes(repo.ready, name) && !_.includes(repo.busy, name), `Creep '${name}' (型号 '${creep.memory.spawnType}') 已经被注册, 无法再次注册`)
         repo.ready.push(name)
         A.proc.signal.Ssignal({ signalId: repo.signalId, request: 1 })
+
+        // 移动 creep 到空闲位置
+        A.timer.add(Game.time + 1, creepName => {
+            const creep = Game.creeps[creepName]
+            if ( !creep ) return A.timer.STOP
+            if ( _.includes(repo.busy, creep.name) ) return A.timer.STOP
+            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length === 0 ) return A.timer.STOP
+            creep.travelTo(creep.pos, { flee: true, ignoreCreeps: false, offRoad: true, avoidStructureTypes: [ STRUCTURE_CONTAINER, STRUCTURE_ROAD ] })
+        }, [ creep.name ], `闲置 ${creep}`, 1)
     }
 
     /**
