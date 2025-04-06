@@ -685,7 +685,8 @@ class PlanModule {
                 unitPos.forEach(pos => {
                     for ( const structureType of unit.structureTypes ) {
                         if ( !(structureType in ret) ) ret[structureType] = []
-                        ret[structureType].push(...unit.getStructurePositions(structureType, pos).map(p => ({pos: new RoomPosition(p.x, p.y, p.roomName), tag: unit.getPositionTags(p.x - pos.x, p.y - pos.y)})))
+                        // Tag 越多越优先
+                        ret[structureType].push(...unit.getStructurePositions(structureType, pos).map(p => ({pos: new RoomPosition(p.x, p.y, p.roomName), tag: unit.getPositionTags(p.x - pos.x, p.y - pos.y)})).sort((u, v) => v.tag.length - u.tag.length))
                     }
                 })
                 return { structures: ret, leftTops: unitPos.map(p => new RoomPosition(p.x, p.y, p.roomName)) }
@@ -927,53 +928,24 @@ class PlanModule {
         return null
     }
     #room2UnitTagSignal: { [roomName: string]: { [unitName: string]: { [tagName: string]: string } } } = {}
-    #updateUnitTagSignal(signalId: string, roomName: string, unitName: string, tagName: string, testExistOrDestroyed: 'exist' | 'destroyed') {
-        if ( testExistOrDestroyed === 'exist' ) {
-            /** 已经完成, 则无需更新 */
-            if ( A.proc.signal.getValue(signalId) === 1 ) return
-            const { unit } = this.#unitDict[unitName]
-            const leftTops = this.plan(roomName, 'unit', unitName).leftTops
-            let flag = false
-            for ( const leftTop of leftTops ) {
-                const requirements = unit.getTagPositions(tagName, leftTop)
-                let anyFail = false
-                for ( const { pos, structureTypes } of requirements ) {
-                    const currentStructures = Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, new RoomPosition(pos.x, pos.y, roomName)).map(s => s.structureType)
-                    if ( structureTypes.length !== _.intersection(structureTypes, currentStructures).length ) {
-                        anyFail = true
-                        break
-                    }
-                }
-                if ( !anyFail ) {
-                    flag = true
-                    break
-                }
-            }
-            if ( flag ) A.proc.signal.Ssignal({ signalId, request: 1 })
-        } else if ( testExistOrDestroyed === 'destroyed' ) {
-            /** 尚未完成, 则无需更新 */
-            if ( A.proc.signal.getValue(signalId) === 0 ) return
-            // 一处摧毁, 可能其他处仍然满足
-            const { unit } = this.#unitDict[unitName]
-            const leftTops = this.plan(roomName, 'unit', unitName).leftTops
-            let flag = false
-            for ( const leftTop of leftTops ) {
-                const requirements = unit.getTagPositions(tagName, leftTop)
-                let anyFail = false
-                for ( const { pos, structureTypes } of requirements ) {
-                    const currentStructures = Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, new RoomPosition(pos.x, pos.y, roomName)).map(s => s.structureType)
-                    if ( structureTypes.length !== _.intersection(structureTypes, currentStructures).length ) {
-                        anyFail = true
-                        break
-                    }
-                }
-                if ( !anyFail ) {
-                    flag = true
-                    break
-                }
-            }
-            if ( !flag ) assertWithMsg(A.proc.signal.Swait({ signalId, lowerbound: 1, request: 1 }) === A.proc.OK)
+    #updateUnitTagSignal(signalId: string, roomName: string, unitName: string, tagName: string) {
+        /** 重置 */
+        if ( A.proc.signal.getValue(signalId) > 0 ) {
+            assertWithMsg( A.proc.signal.Swait( { signalId, lowerbound: A.proc.signal.getValue(signalId), request: A.proc.signal.getValue(signalId) } ) === A.proc.OK )
         }
+        const { unit } = this.#unitDict[unitName]
+        const leftTops = this.plan(roomName, 'unit', unitName).leftTops
+        let cnt = 0
+        for ( const leftTop of leftTops ) {
+            const requirements = unit.getTagPositions(tagName, leftTop)
+            for ( const { pos, structureTypes } of requirements ) {
+                const currentStructures = Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, new RoomPosition(pos.x, pos.y, roomName)).map(s => s.structureType)
+                if ( structureTypes.length === _.intersection(structureTypes, currentStructures).length ) {
+                    cnt += 1
+                }
+            }
+        }
+        assertWithMsg( A.proc.signal.Ssignal({ signalId, request: cnt }) === A.proc.OK )
     }
     #getRoom2UnitTagSignal(roomName: string, unitName: string, tagName: string): string {
         assertWithMsg( this.plan(roomName, 'unit', unitName) !== null, `${roomName} 的建筑单元 ${unitName} 规划在获取是否完成信号量时, 需要一定规划成功` )
@@ -983,7 +955,7 @@ class PlanModule {
 
         if ( !(tagName in this.#room2UnitTagSignal[roomName][unitName]) ) {
             this.#room2UnitTagSignal[roomName][unitName][tagName] = A.proc.signal.createSignal(0)
-            this.#updateUnitTagSignal(this.#room2UnitTagSignal[roomName][unitName][tagName], roomName, unitName, tagName, 'exist')
+            this.#updateUnitTagSignal(this.#room2UnitTagSignal[roomName][unitName][tagName], roomName, unitName, tagName)
         }
         return this.#room2UnitTagSignal[roomName][unitName][tagName]
     }
@@ -992,8 +964,15 @@ class PlanModule {
      * 在多数量建筑单元情况下, 默认是完成一个建筑单元中的要求, 即满足条件
      * 注意: 只有通过 `recommend` 方法得到的建造位置, 才会自动检测建筑是否完成
      */
-    exist(roomName: string, unitName: string, tagName: string) {
-        return A.proc.signal.Swait({ signalId: this.#getRoom2UnitTagSignal(roomName, unitName, tagName), lowerbound: 1, request: 0 })
+    exist(roomName: string, unitName: string, tagName: string, existNumber: number = 1) {
+        return A.proc.signal.Swait({ signalId: this.#getRoom2UnitTagSignal(roomName, unitName, tagName), lowerbound: existNumber, request: 0 })
+    }
+    /**
+     * 获得房间 `roomName` 中建筑单元 `unitName` 的标签 `tagName` 完成建造的数量
+     * 注意: 只有通过 `recommend` 方法得到的建造位置, 才会自动检测建筑是否完成
+     */
+    existNum(roomName: string, unitName: string, tagName: string) {
+        return A.proc.signal.getValue(this.#getRoom2UnitTagSignal(roomName, unitName, tagName))
     }
     /**
      * 判定房间 `roomName` 中建筑单元 `unitName` 的标签 `tagName` 位置是否已经建造完成
@@ -1009,7 +988,7 @@ class PlanModule {
                 const structureIds = Game.rooms[roomName].getEventLog().filter( e => e.event === EVENT_OBJECT_DESTROYED && e.data.type !== 'creep' ).map(e => e.objectId) as Id<Structure>[]
                 structureIds.forEach(id => {
                     if ( !!getStructureMemory(id).tag && getStructureMemory(id).tag.length > 0 ) {
-                        getStructureMemory(id).tag.forEach(t => this.#updateUnitTagSignal(this.#getRoom2UnitTagSignal(getStructureMemory(id).pos.roomName, getStructureMemory(id).unitName, t), getStructureMemory(id).pos.roomName, getStructureMemory(id).unitName, t, 'destroyed'))
+                        getStructureMemory(id).tag.forEach(t => this.#updateUnitTagSignal(this.#getRoom2UnitTagSignal(getStructureMemory(id).pos.roomName, getStructureMemory(id).unitName, t), getStructureMemory(id).pos.roomName, getStructureMemory(id).unitName, t))
                     }
                     deleteStructureMemory(id)
                 })
@@ -1059,7 +1038,7 @@ class PlanModule {
                             getStructureMemory(structure.id).tag = info.tag
                             // 更新相关信号量
                             for ( const t of info.tag )
-                                this.#updateUnitTagSignal(this.#getRoom2UnitTagSignal(info.pos.roomName, info.unitName, t), info.pos.roomName, info.unitName, t, 'exist')
+                                this.#updateUnitTagSignal(this.#getRoom2UnitTagSignal(info.pos.roomName, info.unitName, t), info.pos.roomName, info.unitName, t)
                         }
                     }, [ target.pos ], `注册即将完成的建筑 ${target.id} (${target.pos}, ${target.structureType})`)
                 }
@@ -1070,7 +1049,7 @@ class PlanModule {
 }
 
 export const planModule = new PlanModule()
-
+global.P = planModule
 
 /** 
  * =============================================================================================

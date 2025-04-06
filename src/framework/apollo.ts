@@ -243,6 +243,11 @@ class ProcessModule {
         return this.#idLinkList.shift()
     }
 
+    /** 对外暴露唤醒进程调试接口, 危险! */
+    __wakeUpProc(id: ProcId) {
+        this.#wakeUpProc(id)
+    }
+
     /**
      * 将进程从阻塞态唤醒到就绪态
      * 
@@ -568,8 +573,8 @@ class ProcessModule {
             proc.updateCpuCost(Game.cpu.getUsed() - startCpuTime)
             log(LOG_PROFILE, `🔄 进程 [${proc.description}] 消耗 ${proc.getCpuCost().toFixed(2)}, 停止在 ${proc.pc}.`)
         }
-        log(LOG_DEBUG, `休眠进程池: ${this.#processIdSleepQueue.map(id => "[" + this.#procDict[id].description + "," + this.#procDict[id].pc.toString() + "]")} ...`)
-        log(LOG_DEBUG, `阻塞进程池: ${this.#processIdStuckQueue.map(id => "[" + this.#procDict[id].description + "," + this.#procDict[id].pc.toString() + "]")} ...`)
+        log(LOG_DEBUG, `休眠进程池: ${this.#processIdSleepQueue.map(id => id.toString() + ":[" + this.#procDict[id].description + "," + this.#procDict[id].pc.toString() + "]")} ...`)
+        log(LOG_DEBUG, `阻塞进程池: ${this.#processIdStuckQueue.map(id => id.toString() + ":[" + this.#procDict[id].description + "," + this.#procDict[id].pc.toString() + "]")} ...`)
         // 将进程模块的就绪进程 Id 队列指向临时变量
         this.#processIdReadyQueue = processIdReadyQueue
         // 更新上一次调用函数的时间
@@ -987,7 +992,7 @@ class ResourceModule {
         log(LOG_DEBUG, `${target} 获得资源 ${resourceType} (${amount})`)
         if ( Game.getObjectById(target) && Game.getObjectById(target).store[resourceType] < Apollo.proc.signal.getValue(signalId) + amount ) {
             log(LOG_ERR, `${Game.getObjectById(target)} 应有 ${Apollo.proc.signal.getValue(signalId) + amount}, 但是实际上有 ${Game.getObjectById(target).store[resourceType]}`)
-            stackError(`${Game.getObjectById(target)} 应有 ${Apollo.proc.signal.getValue(signalId) + amount}, 但是实际上有 ${Game.getObjectById(target).store[resourceType]}`)
+            stackError(`${Game.time}: ${Game.getObjectById(target)} 应有 ${Apollo.proc.signal.getValue(signalId) + amount}, 但是实际上有 ${Game.getObjectById(target).store[resourceType]}`)
         }
         return Apollo.proc.signal.Ssignal({ signalId, request: amount })
     }
@@ -1031,31 +1036,63 @@ class ResourceModule {
     /**
      * 注册房间内资源的一个来源
      */
-    registerSource(roomName: string, resourceType: ResourceConstant, source: Id<StorableStructure>) {
+    registerSource(roomName: string, resourceType: ResourceConstant | 'all', source: Id<StorableStructure>) {
         assertWithMsg( !!Game.getObjectById(source) )
-        this.#getResourceSourcesInRoom(roomName, resourceType).ids.push(source)
-        if ( Apollo.proc.signal.getValue(this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId) === 0 )
-            Apollo.proc.signal.Ssignal({ signalId: this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId, request: 1 })
+        if ( resourceType === 'all' ) {
+            for ( const resourceType of RESOURCES_ALL ) this.registerSource(roomName, resourceType, source)
+        } else {
+            this.#getResourceSourcesInRoom(roomName, resourceType).ids.push(source)
+            if ( Apollo.proc.signal.getValue(this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId) === 0 )
+                Apollo.proc.signal.Ssignal({ signalId: this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId, request: 1 })
+        }
     }
     /**
      * 删除房间内资源的一个来源
      */
-    removeSource(roomName: string, resourceType: ResourceConstant, source: Id<StorableStructure>) {
-        _.pull(this.#getResourceSourcesInRoom(roomName, resourceType).ids, source)
-        if ( this.#getResourceSourcesInRoom(roomName, resourceType).ids.length === 0 && Apollo.proc.signal.getValue(this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId) === 1 )
-            Apollo.proc.signal.Swait({ signalId: this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId, request: 1, lowerbound: 1 })
+    removeSource(roomName: string, resourceType: ResourceConstant | 'all', source: Id<StorableStructure>) {
+        if ( resourceType === 'all' ) {
+            for ( const resourceType of RESOURCES_ALL ) this.removeSource(roomName, resourceType, source)
+        } else {
+            _.pull(this.#getResourceSourcesInRoom(roomName, resourceType).ids, source)
+            if ( this.#getResourceSourcesInRoom(roomName, resourceType).ids.length === 0 && Apollo.proc.signal.getValue(this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId) === 1 )
+                Apollo.proc.signal.Swait({ signalId: this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId, request: 1, lowerbound: 1 })
+        }
     }
     /**
      * 请求房间内资源的一个来源
      * @param requestPos 请求资源的发起方位置 - 用于选择来源
      * @param autoWait 是否自动阻塞在房间资源信号量上
      */
-    requestSource(roomName: string, resourceType: ResourceConstant, requestPos?: RoomPosition, autoWait: boolean = true ): { code: StuckableAtomicFuncReturnCode, id: Id<StorableStructure> | null} {
+    requestSource(roomName: string, resourceType: ResourceConstant, amount?: number, requestPos?: RoomPosition, autoWait: boolean = true ): { code: StuckableAtomicFuncReturnCode, id: Id<StorableStructure> | null} {
         const candidates = this.#getResourceSourcesInRoom(roomName, resourceType).ids
         if ( candidates.length === 0 ) return {
             code: autoWait ? Apollo.proc.signal.Swait({ signalId: this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId, lowerbound: 1, request: 0 }) : Apollo.proc.OK, 
             id: null, 
         }
+        // 有数量要求时, 优先满足数量要求
+        if ( !!amount ) {
+            const sufficientCandidates = _.filter(candidates, c => this.query(c, resourceType) >= amount)
+            if ( sufficientCandidates.length > 0 ) {
+                // 有路径要求时, 选择最近的
+                if ( requestPos ) {
+                    return {
+                        code: Apollo.proc.OK, 
+                        id: _.min(sufficientCandidates, id => {
+                            const res = PathFinder.search(requestPos, Game.getObjectById(id).pos)
+                            if ( res.incomplete ) return 0xff
+                            else return res.path.length
+                        })
+                    }
+                // 否则, 默认选择最多的
+                } else {
+                    return {
+                        code: Apollo.proc.OK, 
+                        id: _.max(candidates, id => this.query(id, resourceType))
+                    }
+                }
+            }
+        }
+        // 无数量要求时, 或无法满足数量要求时
         /** @TODO 优化路径查询 */
         if ( requestPos ) return {
             code: Apollo.proc.OK, 

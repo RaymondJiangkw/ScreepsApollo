@@ -29,8 +29,9 @@ interface CreepModuleContext {
      * @param priority 特权级别, 数字越低, 特权越高.
      * @param memory Memory of the new creep. If provided, it will be immediately stored into Memory.creeps[name].
      * @param workPos Creep 预计的工作地点. 可以根据该信息优化生产 Creep 所选用的 Spawn.
+     * @param strict 是否严格要求满足指定 Body
      */
-    spawnCreep(roomName: string, callback: (name: string) => void, body: BodyPartConstant[], priority: number, memory?: CreepMemory, workPos?: RoomPosition): void
+    spawnCreep(roomName: string, callback: (name: string) => void, body: BodyPartConstant[], priority: number, memory?: CreepMemory, workPos?: RoomPosition, strict? : boolean): void
 }
 
 const PRIORITY_CRITICAL = 0
@@ -44,13 +45,15 @@ type CreepTypeDescriptor = {
         /** 按照 Controller 等级划分. 达到特定 Controller 等级, 发生变化. */
         [controllerLevel: number]: BodyPartConstant[]
     } | BodyPartConstant[], 
-    /** 数量设计 */
+    /** 数量设计 (最大数量) */
     amount?: {
         /** 按照 Controller 等级划分. 达到特定 Controller 等级, 发生变化. */
         [controllerLevel: number]: number | 'auto'
     } | number | 'auto', 
     /** 特权级别 */
     priority?: number
+    /** 是否允许缩减 Body 以满足现有能量 */
+    strict?: boolean
 }
 
 class CreepModule {
@@ -66,7 +69,7 @@ class CreepModule {
     MINIMUM_TICKS_TO_LIVE = 0
     #emaBeta: number = 0.9
     #context: CreepModuleContext
-    #types: { [type: string]: { [controllerLevel: string]: {body: BodyPartConstant[], amount: number | 'auto', priority: number} } } = {}
+    #types: { [type: string]: { [controllerLevel: string]: {body: BodyPartConstant[], amount: number | 'auto', priority: number, strict: boolean} } } = {}
     /**
      * 设计特定型号的 Creep
      * @param type 型号名称
@@ -88,7 +91,7 @@ class CreepModule {
             this.#types[type][level] = {
                 body: descriptor.body[largest_less_than(Object.keys(descriptor.body), level)], 
                 amount: descriptor.amount[largest_less_than(Object.keys(descriptor.amount), level)], 
-                priority: descriptor.priority, 
+                priority: descriptor.priority, strict: descriptor.strict
             }
     }
     #repo: { [type: string]: {
@@ -170,15 +173,19 @@ class CreepModule {
 
         assertWithMsg(_.includes(repo.busy, name), `Creep 模块型号 '${creep.memory.spawnType}' 的管辖房间 '${creep.memory.spawnRoomName}'内无法找到正在被占用的 Creep '${name}'`)
 
-        // 从忙碌队列中删去, 并添加到闲置队列中
+        // 从忙碌队列中删去
         _.pull(repo.busy, name)
-        repo.ready.push(name)
-        // 更新信号量
-        A.proc.signal.Ssignal({ signalId: repo.signalId, request: 1 })
+        let addedBack = false
         // 移动 creep 到空闲位置
         A.timer.add(Game.time + 1, creepName => {
             const creep = Game.creeps[creepName]
             if ( !creep ) return A.timer.STOP
+            if ( !addedBack ) {
+                addedBack = true
+                repo.ready.push(name)
+                // 更新信号量
+                A.proc.signal.Ssignal({ signalId: repo.signalId, request: 1 })
+            }
             if ( _.includes(repo.busy, creep.name) ) return A.timer.STOP
             if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length === 0 ) return A.timer.STOP
             creep.travelTo(creep.pos, { flee: true, ignoreCreeps: false, offRoad: true, avoidStructureTypes: [ STRUCTURE_CONTAINER, STRUCTURE_ROAD ] })
@@ -204,7 +211,7 @@ class CreepModule {
                 repo.spawning -= 1
                 this.#register(name)
             }, 
-            prototype.body, prototype.priority, { spawnType: type, spawnRoomName: roomName }, workPos, 
+            prototype.body, prototype.priority, { spawnType: type, spawnRoomName: roomName }, workPos, prototype.strict
         )
     }
 
@@ -233,6 +240,9 @@ class CreepModule {
     /** 补充特定型号的 Creep 数量 (不检查是否有 Creep 应当消亡) */
     #replenish(type: string, roomName: string, workPos?: RoomPosition) {
         const repo = this.#getRepo(type, roomName)
+        const controllerLevel = Game.rooms[roomName].controller.level
+        const descriptor = this.#types[type][controllerLevel]
+        assertWithMsg( descriptor.amount !== 'auto' || !workPos, `指定 WorkPos 时, 数量不可设置为 auto 由于定时补充数量任务. 但是收到对于 ${roomName} -> ${type} 的 WorkPos 指定!` )
         const currentAmount = repo.ready.length + repo.busy.length + repo.spawning
         const expectedAmount = this.#getExpectedAmount(type, roomName)
         log(LOG_DEBUG, `检查管辖房间 ${roomName}, 型号 ${type} Creep: ${currentAmount}/${expectedAmount}`)
@@ -299,8 +309,9 @@ class CreepModule {
                 // 导致出现最终无 Creep 可用, 却有申请等待的进程, 即
                 // 进程饥饿现象, 在消亡时, 进行数量检查并进行补充.
                 _.pull(repo.busy, name)
-                this.#replenish(Memory.creeps[name].spawnType, Memory.creeps[name].spawnRoomName)
             }
+            
+            this.#replenish(Memory.creeps[name].spawnType, Memory.creeps[name].spawnRoomName)
         }
         delete Memory.creeps[name]
     }
@@ -345,6 +356,19 @@ class CreepModule {
                     else this.#repo[type][roomName].requestEMA = this.#repo[type][roomName].requestEMA * this.#emaBeta + currentRequest * (1 - this.#emaBeta)
                 }
         }, [], `追踪记录每个管辖房间, 每个型号的 Creep 数量`, 1)
+
+        // 定期检查数量为 `auto` 的 Creep 型号, 补充数量
+        A.timer.add(Game.time + 1 + Math.ceil(Math.random() * CREEP_LIFE_TIME), () => {
+            for (const type in this.#repo) {
+                for (const roomName in this.#repo[type]) {
+                    if ( !Game.rooms[roomName] || !Game.rooms[roomName].controller ) continue
+                    const controllerLevel = Game.rooms[roomName].controller.level
+                    const descriptor = this.#types[type][controllerLevel]
+                    if ( descriptor.amount === 'auto' )
+                        this.#replenish(type, roomName)
+                }
+            }
+        }, [], `定时检查是否需要补充数量为 auto 的 Creep 型号`, CREEP_LIFE_TIME)
     }
 }
 
@@ -489,6 +513,7 @@ class CreepSpawnModule {
         A.proc.trigger('watch', () => {
             if ( !(roomName in Game.rooms) || !Game.rooms[roomName].controller.my ) return false
             const remainingOrderAmount = this.#calRequestAmount(roomName)
+            log(LOG_DEBUG, `当前 ${roomName} 内剩余需要生产的 Creep 数量为 ${remainingOrderAmount}.`)
             return remainingOrderAmount > 0
         }, [ pid ])
     }

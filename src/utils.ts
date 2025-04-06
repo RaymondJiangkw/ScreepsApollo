@@ -115,7 +115,7 @@ export function convertPosToString(pos: Pos) {
 }
 
 export function insertSortedBy<T>(arr: T[], value: T, iteratee?: string | ((element: T) => any)) {
-    arr.splice(_.sortedIndex(arr, value, iteratee), 0, value)
+    arr.splice(_.sortedLastIndex(arr, value, iteratee), 0, value)
 }
 
 export function getUsedCapacity(structure: StorableStructure) {

@@ -6,9 +6,6 @@ import { assertWithMsg, generate_random_hex, getUsedCapacity, insertSortedBy, lo
 import { Apollo as A } from "@/framework/apollo"
 import { creepModule as C } from "./creep"
 
-type TransferResourceType = ResourceConstant | 'all'
-type TransferAmount = number | 'all'
-
 const PRIORITY_CASUAL = 2
 const PRIORITY_NORMAL = 1
 const PRIORITY_IMPORTANT = 0
@@ -23,8 +20,7 @@ type TransferTaskDescription = {
     toId            : Id<StorableStructure>, 
     /** 无视角时, 给定位置 */
     toPos           : Pos, 
-    resourceType    : TransferResourceType, 
-    amount          : TransferAmount, 
+    content         : { resourceType: ResourceConstant, amount: number }[], 
     priority        : PriorityType, 
     afterSignalId?  : string, 
     loseCallback?   : (amount: number, resourceType: ResourceConstant) => void, 
@@ -37,6 +33,8 @@ interface TransferOpts {
     afterSignalId?: string
     /** 当运输过程中丢失时, 触发回调函数 */
     loseCallback?: (amount: number, resourceType: ResourceConstant) => void
+    /** 是否允许不匹配 `loseCallback` 进行合并 */
+    allowLooseGrouping?: boolean
 }
 
 type TransferTarget = Id<StorableStructure> | { id: Id<StorableStructure> | null, pos: Pos }
@@ -62,20 +60,16 @@ class TransferModule {
         this.#issuedRoomNames.push(roomName)
         for ( let idx = 0; idx < this.#MAXIMUM_TRANSFERRING_NUM; ++idx ) {
             let workerName = null
-            let currentTransferTasks: TransferTaskDescription[] = []
-            type TargetDict = { [taskId: string]: { 
-                targetId: Id<StorableStructure>, 
-                targetPos: Pos, 
-                resourceType: ResourceConstant, 
-                amount: number
-            } }
+            let currentTransferTask: TransferTaskDescription = null
+            type TargetDict = { [resourceType in ResourceConstant]?: number }
+            /** 当前携带的资源 */
             let targetDict: TargetDict = {};
-            ((workerName: string, currentTransferTasks: TransferTaskDescription[], targetDict: TargetDict) => {
+            ((workerName: string, getCurrentTransferTask: () => TransferTaskDescription, setCurrentTransferTack: (v: TransferTaskDescription) => void, targetDict: TargetDict) => {
                 /** 先一次性取完, 再一次性送完 */
                 A.proc.createProc([
                     ['start', () => A.proc.signal.Swait({ signalId: this.#getTaskQueue(roomName).lengthSignalId, lowerbound: 1, request: 1 })], 
                     () => {
-                        currentTransferTasks.push(this.#getTaskQueue(roomName).queue.shift())
+                        setCurrentTransferTack(this.#getTaskQueue(roomName).queue.shift())
                         return A.proc.OK
                     }, 
                     () => C.acquire('transferer', roomName, name => workerName = name), 
@@ -108,204 +102,175 @@ class TransferModule {
                             workerName = null
                             // 恢复任务, 不用恢复 `from` 的资源, 因为运输一定完成
                             // 相应的资源一定被消耗
-                            currentTransferTasks.forEach(task => {
-                                if ( task.id in targetDict && typeof task.amount === 'number' ) {
-                                    // task.amount += targetDict[task.id].amount
-                                    if ( task.loseCallback ) task.loseCallback(targetDict[task.id].amount, targetDict[task.id].resourceType)
-                                    const to = Game.getObjectById(task.toId)
-                                    if ( !!to ) {
-                                        assertWithMsg( A.res.signal(task.toId, A.res.describeCapacity(to, task.resourceType), targetDict[task.id].amount) === A.proc.OK )
-                                        task.finishWithdraw = task.amount === 0
-                                    } else task.finishWithdraw = true
-                                }
-                                if ( !task.finishWithdraw ) {
-                                    insertSortedBy(this.#getTaskQueue(roomName).queue, task, 'priority')
-                                    A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
-                                }
-                            })
-                            targetDict = {}
-                            currentTransferTasks = []
+                            // 此时 targetDict 应当为空
+                            assertWithMsg( !!getCurrentTransferTask(), `'moveToSource'时 Creep 消失, 应当仍然有任务` )
+                            assertWithMsg( Object.keys(targetDict).length === 0, `'moveToSource'时 Creep 消失, 应当不携带任何资源` )
+                            insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
+                            A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
+                            setCurrentTransferTack( null )
                             return [A.proc.STOP_ERR, `Creep [${workerName}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
                         }
 
-                        if ( currentTransferTasks.length === 0 ) {
-                            C.release(workerName)
-                            workerName = null
-                            return [ A.proc.OK_STOP_CUSTOM, 'start' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
-                        }
-
-                        /** 此时一定为第一个 */
-                        const currentTransferTask = currentTransferTasks[0]
-                        if ( currentTransferTask.finishWithdraw )
-                            return [ A.proc.OK_STOP_CUSTOM, 'moveToTarget' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
-                        if ( creep.pos.roomName !== currentTransferTask.fromPos.roomName || creep.pos.getRangeTo(currentTransferTask.fromPos.x, currentTransferTask.fromPos.y) > 1 ) {
-                            creep.travelTo(new RoomPosition(currentTransferTask.fromPos.x, currentTransferTask.fromPos.y, currentTransferTask.fromPos.roomName))
+                        if ( creep.pos.roomName !== getCurrentTransferTask().fromPos.roomName || creep.pos.getRangeTo(getCurrentTransferTask().fromPos.x, getCurrentTransferTask().fromPos.y) > 1 ) {
+                            creep.travelTo(new RoomPosition(getCurrentTransferTask().fromPos.x, getCurrentTransferTask().fromPos.y, getCurrentTransferTask().fromPos.roomName))
                             return A.proc.OK_STOP_CURRENT
                         }
                         // 检验 afterSignal
-                        if ( !currentTransferTask.afterSignalId ) return [ A.proc.OK_STOP_CUSTOM, 'withdraw' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+                        if ( !getCurrentTransferTask().afterSignalId ) return [ A.proc.OK_STOP_CUSTOM, 'withdraw' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
                         return A.proc.OK
                     }], 
                     () => {
-                        const currentTransferTask = currentTransferTasks[0]
-                        const ret = A.proc.signal.Swait({ signalId: currentTransferTask.afterSignalId, lowerbound: 1, request: 0 })
+                        /** 等待另一个信号量完成 */
+                        const ret = A.proc.signal.Swait({ signalId: getCurrentTransferTask().afterSignalId, lowerbound: 1, request: 0 })
                         if ( ret === A.proc.OK ) {
-                            A.proc.signal.destroySignal( currentTransferTask.afterSignalId )
-                            currentTransferTask.afterSignalId = undefined
+                            A.proc.signal.destroySignal( getCurrentTransferTask().afterSignalId )
+                            getCurrentTransferTask().afterSignalId = undefined
                         }
                         return ret
                     }, 
                     [ 'withdraw', () => {
                         const creep = Game.creeps[workerName]
                         /** 检测到错误, 立即释放资源 */
-                        if ( !creep || creep.ticksToLive < 2 ) {
-                            if ( creep ) creep.suicide()
+                        if ( !creep ) {
+                            // || creep.ticksToLive < 3
+                            // if ( creep ) creep.suicide()
                             // 释放 Creep
                             C.cancel(workerName)
                             workerName = null
                             // 恢复任务
-                            currentTransferTasks.forEach(task => {
-                                if ( task.id in targetDict && typeof task.amount === 'number' ) {
-                                    // task.amount += targetDict[task.id].amount
-                                    if ( task.loseCallback ) task.loseCallback(targetDict[task.id].amount, targetDict[task.id].resourceType)
-                                    const to = Game.getObjectById(task.toId)
-                                    if ( !!to ) {
-                                        assertWithMsg( A.res.signal(task.toId, A.res.describeCapacity(to, task.resourceType), targetDict[task.id].amount) === A.proc.OK )
-                                        task.finishWithdraw = task.amount === 0
-                                    } else task.finishWithdraw = true
+                            // 永久丢失的资源
+                            for ( const resourceType in targetDict ) {
+                                if ( getCurrentTransferTask().loseCallback )
+                                    getCurrentTransferTask().loseCallback(targetDict[resourceType], resourceType as ResourceConstant)
+                                const to = Game.getObjectById(getCurrentTransferTask().toId)
+                                if ( !!to ) {
+                                    // 腾出空间
+                                    assertWithMsg( A.res.signal(to.id, A.res.describeCapacity(to, resourceType as ResourceConstant), targetDict[resourceType]) === A.proc.OK )
                                 }
-                                if ( !task.finishWithdraw ) {
-                                    insertSortedBy(this.#getTaskQueue(roomName).queue, task, 'priority')
-                                    A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
-                                }
-                            })
+                            }
+                            if ( !getCurrentTransferTask().finishWithdraw ) {
+                                insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
+                                A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
+                            }
+                            
                             targetDict = {}
-                            currentTransferTasks = []
+                            setCurrentTransferTack( null )
                             return [A.proc.STOP_ERR, `Creep [${workerName}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
                         }
+                        
+                        // 在最后一秒 withdraw 或 transfer 会返回成功, 但是不会执行
+                        if ( creep.ticksToLive === 1 ) return A.proc.OK_STOP_CURRENT
 
                         assertWithMsg( creep.store.getFreeCapacity() > 0 )
+                        assertWithMsg( !!getCurrentTransferTask().fromId, `源 Id 未定时, 尚未实现` )
 
-                        /** 此时一定为第一个 */
-                        const currentTransferTask = currentTransferTasks[0]
-                        assertWithMsg( !!currentTransferTask.fromId, `源 Id 未定时, 尚未实现` )
-                        const source = Game.getObjectById(currentTransferTask.fromId)
+                        const source = Game.getObjectById(getCurrentTransferTask().fromId)
                         if ( !source ) {
-                            currentTransferTasks.shift()
-                            return [ A.proc.OK_STOP_CUSTOM, 'moveToSource' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+                            const to = Game.getObjectById(getCurrentTransferTask().toId)
+                            if ( !!to ) {
+                                for ( const { resourceType, amount } of getCurrentTransferTask().content )
+                                    assertWithMsg( A.res.signal(getCurrentTransferTask().toId, A.res.describeCapacity(to, resourceType), amount) === A.proc.OK )
+                                if ( Object.keys(targetDict).length > 0 )
+                                    return [ A.proc.OK_STOP_CUSTOM, 'moveToTarget' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+                            }
+                            targetDict = {}
+                            setCurrentTransferTack( null )
+                            return [ A.proc.OK_STOP_CUSTOM, 'start' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
                         }
 
                         /** 确定运输的种类和数量 & 确定是否运输完成 */
-                        let resourceType: ResourceConstant = null
-                        let amount: number = null
-                        if ( currentTransferTask.resourceType === 'all' ) {
-                            if ( getUsedCapacity(source) === 0 ) {
-                                // 全部运输完成
-                                currentTransferTask.finishWithdraw = true
-                                currentTransferTasks.shift()
-                                return [ A.proc.OK_STOP_CUSTOM, 'moveToSource' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
-                            }
-                            assertWithMsg( currentTransferTask.amount === 'all', `当运输资源为 all 时, 运输数量也应当为 all. 但实际是 ${currentTransferTask.amount}.` )
-                            resourceType = Object.keys(source.store)[0] as ResourceConstant
-                            amount = Math.min(source.store[resourceType], creep.store.getFreeCapacity())
-                            if ( Object.keys(source.store).length === 1 && amount === source.store[resourceType] )
-                                currentTransferTask.finishWithdraw = true
-                        } else {
-                            resourceType = currentTransferTask.resourceType
-                            if ( currentTransferTask.amount === 'all' ) amount = Math.min(source.store[resourceType] || 0, creep.store.getFreeCapacity())
-                            else amount = Math.min(source.store[resourceType] || 0, creep.store.getFreeCapacity(), currentTransferTask.amount)
-
-                            if ( typeof currentTransferTask.amount === 'number' )
-                                currentTransferTask.amount -= amount
-                            if ( (currentTransferTask.amount === 'all' && amount === (source.store[resourceType] || 0)) || (typeof currentTransferTask.amount === 'number' && currentTransferTask.amount <= 0) )
-                                currentTransferTask.finishWithdraw = true
-                        }
-
-                        if ( amount === 0 ) {
-                            currentTransferTasks.shift()
-                            return [ A.proc.OK_STOP_CUSTOM, 'moveToSource' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
-                        }
-
+                        let resourceType = getCurrentTransferTask().content[0].resourceType
+                        let amount = Math.min(creep.store.getFreeCapacity(), getCurrentTransferTask().content[0].amount)
+                        assertWithMsg( amount >= 0 && amount <= (source.store[resourceType] || 0), `取资源时, ${source} 应至少有 ${amount} ${resourceType} 但只有 ${source.store[resourceType] || 0}.` )
                         assertWithMsg( creep.withdraw(source, resourceType, amount) === OK )
                         A.timer.add(Game.time + 1, (sourceId, capacityType, amount) => A.res.signal(sourceId, capacityType, amount), [source.id, A.res.describeCapacity(source, resourceType), amount], `取资源后, 更新源建筑的容量`)
-                        targetDict[currentTransferTask.id] = { targetId: currentTransferTask.toId, targetPos: currentTransferTask.toPos, resourceType, amount }
 
-                        if ( currentTransferTask.finishWithdraw ) currentTransferTasks.push(currentTransferTasks.shift())
-                        if ( Object.keys(targetDict).length < currentTransferTasks.length && !currentTransferTasks[0].finishWithdraw && creep.store.getFreeCapacity() - amount > 0 )
-                            return [ A.proc.OK_STOP_CUSTOM, 'moveToSource' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+                        getCurrentTransferTask().content[0].amount -= amount
+                        targetDict[resourceType] = amount
+                        if ( getCurrentTransferTask().content[0].amount === 0 ) {
+                            getCurrentTransferTask().content.shift()
+                            getCurrentTransferTask().finishWithdraw = getCurrentTransferTask().content.length === 0
+                        }
 
-                        return A.proc.OK
+                        if ( getCurrentTransferTask().finishWithdraw || creep.store.getFreeCapacity() === amount ) return A.proc.OK_STOP_NEXT
+                        else return A.proc.OK_STOP_CURRENT
                     } ], 
                     ['moveToTarget', () => {
                         const creep = Game.creeps[workerName]
                         /** 检测到错误, 立即释放资源 */
-                        if ( !creep || creep.ticksToLive < 2 ) {
-                            if ( creep ) creep.suicide()
+                        if ( !creep ) {
+                            // || creep.ticksToLive < 3
+                            // if ( creep ) creep.suicide()
                             // 释放 Creep
                             C.cancel(workerName)
                             workerName = null
                             // 恢复任务
-                            currentTransferTasks.forEach(task => {
-                                if ( task.id in targetDict && typeof task.amount === 'number' ) {
-                                    // task.amount += targetDict[task.id].amount
-                                    if ( task.loseCallback ) task.loseCallback(targetDict[task.id].amount, targetDict[task.id].resourceType)
-                                    const to = Game.getObjectById(task.toId)
-                                    if ( !!to ) {
-                                        assertWithMsg( A.res.signal(task.toId, A.res.describeCapacity(to, task.resourceType), targetDict[task.id].amount) === A.proc.OK )
-                                        task.finishWithdraw = task.amount === 0
-                                    } else task.finishWithdraw = true
+                            // 永久丢失的资源
+                            for ( const resourceType in targetDict ) {
+                                if ( getCurrentTransferTask().loseCallback )
+                                    getCurrentTransferTask().loseCallback(targetDict[resourceType], resourceType as ResourceConstant)
+                                const to = Game.getObjectById(getCurrentTransferTask().toId)
+                                if ( !!to ) {
+                                    // 腾出空间
+                                    assertWithMsg( A.res.signal(to.id, A.res.describeCapacity(to, resourceType as ResourceConstant), targetDict[resourceType]) === A.proc.OK )
                                 }
-                                if ( !task.finishWithdraw ) {
-                                    insertSortedBy(this.#getTaskQueue(roomName).queue, task, 'priority')
-                                    A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
-                                }
-                            })
+                            }
+                            if ( !getCurrentTransferTask().finishWithdraw ) {
+                                insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
+                                A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
+                            }
+                            
                             targetDict = {}
-                            currentTransferTasks = []
+                            setCurrentTransferTack( null )
                             return [A.proc.STOP_ERR, `Creep [${workerName}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
                         }
+                        
+                        // 在最后一秒 withdraw 或 transfer 会返回成功, 但是不会执行
+                        if ( creep.ticksToLive === 1 ) return A.proc.OK_STOP_CURRENT
 
-                        const taskIds = Object.keys(targetDict)
-                        if ( taskIds.length > 0 ) {
-                            const currentTarget = targetDict[taskIds[0]]
-                            if ( creep.pos.roomName !== currentTarget.targetPos.roomName || creep.pos.getRangeTo(currentTarget.targetPos.x, currentTarget.targetPos.y) > 1) {
-                                creep.travelTo(new RoomPosition(currentTarget.targetPos.x, currentTarget.targetPos.y, currentTarget.targetPos.roomName))
-                                return A.proc.OK_STOP_CURRENT
-                            }
-
-                            const target = Game.getObjectById(currentTarget.targetId)
-                            if ( !target ) {
-                                delete targetDict[taskIds[0]]
-                                return A.proc.OK_STOP_CURRENT
-                            }
-
-                            const amount = Math.min(currentTarget.amount, creep.store[currentTarget.resourceType], target.store.getFreeCapacity(currentTarget.resourceType))
-                            assertWithMsg( creep.transfer(target, currentTarget.resourceType, amount) === OK )
-                            A.timer.add(Game.time + 1, (targetId, resourceType, amount) => A.res.signal(targetId, resourceType, amount), [target.id, currentTarget.resourceType, amount], `转移资源后, 更新目标建筑相应资源的数量`)
-                            currentTarget.amount -= amount
-                            if ( currentTarget.amount === 0 )
-                                delete targetDict[taskIds[0]]
-                            else
-                                return A.proc.OK_STOP_CURRENT
+                        if ( creep.pos.roomName !== getCurrentTransferTask().toPos.roomName || creep.pos.getRangeTo(getCurrentTransferTask().toPos.x, getCurrentTransferTask().toPos.y) > 1) {
+                            creep.travelTo(new RoomPosition(getCurrentTransferTask().toPos.x, getCurrentTransferTask().toPos.y, getCurrentTransferTask().toPos.roomName))
+                            return A.proc.OK_STOP_CURRENT
                         }
 
-                        if ( taskIds.length > 1 ) return A.proc.OK_STOP_CURRENT
-                        // 全部转移完成
-                        if ( currentTransferTasks[0].finishWithdraw ) {
-                            // 全部完成
-                            C.release(workerName)
-                            workerName = null
+                        const target = Game.getObjectById(getCurrentTransferTask().toId)
+                        if ( !target ) {
+                            const source = Game.getObjectById(getCurrentTransferTask().fromId)
+                            if ( !!source ) {
+                                for ( const { resourceType, amount } of getCurrentTransferTask().content )
+                                    assertWithMsg( A.res.signal(getCurrentTransferTask().fromId, resourceType, amount) === A.proc.OK )
+                            }
                             targetDict = {}
-                            currentTransferTasks = []
+                            setCurrentTransferTack( null )
                             return [ A.proc.OK_STOP_CUSTOM, 'start' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
-                        } else return [ A.proc.OK_STOP_CUSTOM, 'moveToSource' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+                        }
+
+                        const resourceType = Object.keys(targetDict)[0] as ResourceConstant
+                        const amount = targetDict[resourceType]
+                        assertWithMsg( amount <= creep.store[resourceType] && amount <= target.store.getFreeCapacity(resourceType), `transfer -> 242 ${amount}}` )
+                        assertWithMsg( creep.transfer(target, resourceType, amount) === OK )
+                        A.timer.add(Game.time + 1, (targetId, resourceType, amount) => A.res.signal(targetId, resourceType, amount), [target.id, resourceType, amount], `转移资源后, 更新目标建筑相应资源的数量`)
+                        delete targetDict[resourceType]
+
+                        if ( Object.keys(targetDict).length > 0 ) return A.proc.OK_STOP_CURRENT
+                        
+                        // 归还, 以留空间给更高优先级的任务
+                        C.release(workerName)
+                        workerName = null
+                        targetDict = {}
+                        if ( !getCurrentTransferTask().finishWithdraw ) {
+                            insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
+                            A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
+                        }
+                        setCurrentTransferTack( null )
+                        return [ A.proc.OK_STOP_CUSTOM, 'start' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
                     }]
                 ], `${roomName} => Transfer ${idx}`)
-            })(workerName, currentTransferTasks, targetDict)
+            })(workerName, () => currentTransferTask, v => currentTransferTask = v, targetDict)
         }
     }
     /** 在给定确切资源种类及数量时, 会一定完成; 无法完成, 则会调用回调函数 (可选). 运输资源时, 应提前 request. */
-    transfer( from: TransferTarget, to: TransferTarget, resourceType: TransferResourceType, amount: TransferAmount, opts: TransferOpts = {} ): void {
+    transfer( from: TransferTarget, to: TransferTarget, resourceType: ResourceConstant, amount: number, opts: TransferOpts = {} ): void {
         _.defaults(opts, { priority: PRIORITY_NORMAL })
         /** 规整参数 */
         if ( typeof from === 'string' ) {
@@ -334,7 +299,7 @@ class TransferModule {
                 const taskDescription: TransferTaskDescription = {
                     fromId: from.id, fromPos: from.pos, 
                     toId: to.id, toPos: to.pos, 
-                    resourceType, amount, 
+                    content: [ { resourceType, amount } ], 
                     priority: opts.priority, afterSignalId: opts.afterSignalId, 
                     loseCallback: opts.loseCallback, 
                     finishWithdraw: false, id: generate_random_hex(8), 
@@ -344,14 +309,41 @@ class TransferModule {
                 const queueIds = Object.keys(this.#takeOverInfo).filter(key => this.#takeOverInfo[key].fromIds.includes((from as any).id) && this.#takeOverInfo[key].toIds.includes((to as any).id))
                 if ( queueIds.length > 0 )
                     queueIds.forEach(queueId => {
-                        insertSortedBy(this.#takeOverInfo[queueId].queue, taskDescription, 'priority')
-                        A.proc.signal.Ssignal({ signalId: this.#takeOverInfo[queueId].lengthSignalId, request: 1 })
+                        // 尝试合并
+                        let find = false
+                        for ( const t of this.#takeOverInfo[queueId].queue ) {
+                            if ( t.fromId === taskDescription.fromId && t.toId === taskDescription.toId && t.priority === taskDescription.priority && t.afterSignalId === taskDescription.afterSignalId && ( opts.allowLooseGrouping || t.loseCallback === taskDescription.loseCallback ) ) {
+                                const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
+                                if ( !!c ) c.amount += amount
+                                else t.content.push({ resourceType, amount })
+                                find = true
+                                break
+                            }
+                        }
+                        if ( !find ) {
+                            insertSortedBy(this.#takeOverInfo[queueId].queue, taskDescription, 'priority')
+                            A.proc.signal.Ssignal({ signalId: this.#takeOverInfo[queueId].lengthSignalId, request: 1 })
+                        }
                     })
                 else {
-                    insertSortedBy(this.#getTaskQueue(from.pos.roomName).queue, taskDescription, 'priority')
-                    A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(from.pos.roomName).lengthSignalId, request: 1 })
-                    // 检验房间发出运输进程
-                    this.#issueForRoomName(from.pos.roomName)
+                    // 尝试合并
+                    let find = false
+                    for ( const t of this.#getTaskQueue(from.pos.roomName).queue ) {
+                        if ( t.fromId === taskDescription.fromId && t.toId === taskDescription.toId && t.priority === taskDescription.priority && t.afterSignalId === taskDescription.afterSignalId && ( opts.allowLooseGrouping || t.loseCallback === taskDescription.loseCallback ) ) {
+                            const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
+                            if ( !!c ) c.amount += amount
+                            else t.content.push({ resourceType, amount })
+                            find = true
+                            break
+                        }
+                        // log(LOG_DEBUG, `无法合并 ${JSON.stringify(taskDescription)} 和 ${JSON.stringify(t)}.`)
+                    }
+                    if ( !find ) {
+                        insertSortedBy(this.#getTaskQueue(from.pos.roomName).queue, taskDescription, 'priority')
+                        A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(from.pos.roomName).lengthSignalId, request: 1 })
+                        // 检验房间发出运输进程
+                        this.#issueForRoomName(from.pos.roomName)
+                    }
                 }
             } else {
                 // 非控制房间内运输暂未实现
@@ -361,6 +353,9 @@ class TransferModule {
             // 跨房间运输
             raiseNotImplementedError()
         }
+    }
+    print( roomName: string ) {
+        log(LOG_DEBUG, `${roomName} Transfer 任务:` + JSON.stringify(this.#getTaskQueue(roomName).queue))
     }
 
     #takeOverInfo: { [ queueId: string ]: { 
@@ -387,12 +382,20 @@ class TransferModule {
         }
         return { queueId, queue: this.#takeOverInfo[queueId].queue, lengthSignalId: this.#takeOverInfo[queueId].lengthSignalId }
     }
-    bindTakeOver( queueId: string, token: 'from' | 'to', structureId: Id<StorableStructure> ) {
+    bindTakeOver( queueId: string, token: 'from' | 'to' | 'all', structureId: Id<StorableStructure> ) {
         assertWithMsg( queueId in this.#takeOverInfo, `transfer -> 386` )
-        if ( token === 'from' )
+        if ( (token === 'from' || token === 'all') && !this.#takeOverInfo[queueId].fromIds.includes(structureId) )
             this.#takeOverInfo[queueId].fromIds.push(structureId)
-        else if ( token === 'to' )
+        if ( (token === 'to' || token === 'all') && !this.#takeOverInfo[queueId].toIds.includes(structureId) )
             this.#takeOverInfo[queueId].toIds.push(structureId)
+        return this
+    }
+    removeTakeOver( queueId: string, token: 'from' | 'to' | 'all', structureId: Id<StorableStructure> ) {
+        assertWithMsg( queueId in this.#takeOverInfo, `transfer -> 386` )
+        if ( (token === 'from' || token === 'all') && !this.#takeOverInfo[queueId].fromIds.includes(structureId) )
+            this.#takeOverInfo[queueId].fromIds = _.remove(this.#takeOverInfo[queueId].fromIds, id => id === structureId)
+        if ( (token === 'to' || token === 'all') && !this.#takeOverInfo[queueId].toIds.includes(structureId) )
+            this.#takeOverInfo[queueId].toIds = _.remove(this.#takeOverInfo[queueId].toIds, id => id === structureId)
         return this
     }
     constructor() {

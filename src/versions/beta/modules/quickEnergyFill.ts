@@ -22,6 +22,7 @@ export function registerQuickEnergyFill() {
                 8: [ CARRY, CARRY, CARRY, CARRY, MOVE ]
             }, 
             priority: C.PRIORITY_IMPORTANT, 
+            amount: 1
         })
 }
 
@@ -65,7 +66,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
         if ( idLink !== null && Game.getObjectById( idLink ) ) return A.proc.STOP_SLEEP
         else if ( idLink !== null ) {
             const prevLength = getLinkBuffer().length
-            _.remove( getLinkBuffer(), e => e[0] === idLink )
+            _.remove( getLinkBuffer(), e => e === idLink )
             if ( prevLength > 0 && getLinkBuffer().length === 0 )
                 assertWithMsg( A.proc.signal.Swait({ signalId: linkBufferSignal, lowerbound: 1, request: 1 }) === A.proc.OK, `quickEnergyFill -> 70` )
             idLink = null
@@ -92,7 +93,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
     A.proc.trigger('watch', () => {
         if ( idLink !== null && !Game.getObjectById( idLink ) ) {
             const prevLength = getLinkBuffer().length
-            _.remove( getLinkBuffer(), e => e[0] === idLink )
+            _.remove( getLinkBuffer(), e => e === idLink )
             if ( prevLength > 0 && getLinkBuffer().length === 0 )
                 assertWithMsg( A.proc.signal.Swait({ signalId: linkBufferSignal, lowerbound: 1, request: 1 }) === A.proc.OK, `quickEnergyFill -> 97` )
             idLink = null
@@ -154,17 +155,17 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
                 return A.res.request({ id: idLink, resourceType: RESOURCE_ENERGY, amount: {lowerbound: Math.min(CARRY_CAPACITY, containerEnergyGap[0]), request: 0} })
         } else {
             /** === 无 Link 时 === */
-            requestedSource = A.res.requestSource( roomName, RESOURCE_ENERGY )
+            requestedSource = A.res.requestSource( roomName, RESOURCE_ENERGY, CARRY_CAPACITY, Game.getObjectById(containerId).pos, true )
             if ( requestedSource.code !== A.proc.OK )
                 return requestedSource.code
             amount = A.res.query(requestedSource.id, RESOURCE_ENERGY)
-            if ( amount === 0 )
-                return A.res.request({ id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: {lowerbound: Math.min(CARRY_CAPACITY, containerEnergyGap[0]), request: 0} })
+            if ( amount < CARRY_CAPACITY )
+                return A.res.request({ id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: {lowerbound: CARRY_CAPACITY, request: 0} })
         }
 
         const capacity = A.res.query(containerId, A.res.CAPACITY)
-        if ( capacity === 0 )
-            return A.res.request({ id: containerId, resourceType: A.res.CAPACITY, amount: {lowerbound: Math.min(CARRY_CAPACITY, containerEnergyGap[0]), request: 0} })
+        if ( capacity < CARRY_CAPACITY )
+            return A.res.request({ id: containerId, resourceType: A.res.CAPACITY, amount: {lowerbound: CARRY_CAPACITY, request: 0} })
         // 尝试尽可能多的转移能量
         let energyGap = 0
         while ( true ) {
@@ -194,7 +195,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
             T.transfer(requestedSource.id, containerId, RESOURCE_ENERGY, energyGap, { loseCallback: (amount, resourceType) => {
                 containerEnergyGap.push(amount)
                 A.proc.signal.Ssignal({ signalId: containerEnergyGapSignal, request: 1 })
-            } })
+            }, allowLooseGrouping: true })
         }
 
         if ( containerEnergyGap.length === 0 )
@@ -323,11 +324,11 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
 
         /** 移动到工作位置 */
         if ( creep.pos.roomName !== workerPos.roomName || creep.pos.getRangeTo(workerPos.x, workerPos.y) > 0 ) {
-            creep.travelTo(new RoomPosition(workerPos.x, workerPos.y, workerPos.roomName))
+            creep.moveTo(new RoomPosition(workerPos.x, workerPos.y, workerPos.roomName))
             return A.proc.OK_STOP_CURRENT
         }
 
-        return A.proc.OK
+        return A.proc.OK_STOP_NEXT
     }
 
     function runCreepWithdraw( getFillerName: () => string, setFillerName: (name: string) => void, workerPos: Pos, pool: TransferTaskDescriptor[], poolSignal: string, getCurrentTask: () => TransferTaskDescriptor, setCurrentTask: ( task: TransferTaskDescriptor ) => void ) {

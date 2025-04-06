@@ -5,7 +5,9 @@
 import { Apollo as A } from "@/framework/apollo"
 import { planModule as P } from "@/modules/plan"
 import { creepModule as C } from "@/modules/creep"
+import { transferModule as T } from "@/modules/transfer"
 import { assertWithMsg, calcBodyEffectiveness, getAvailableSurroundingPos, log, LOG_DEBUG, LOG_ERR, LOG_INFO } from "@/utils"
+import { getMaintainAmount } from "../config.production"
 
 /** 管理 Source 附近的建筑 */
 type SourceRelevantStructures = {
@@ -66,7 +68,7 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
     let harvesterName = null
 
     // 初始化时注册 Container
-    if ( info()[STRUCTURE_CONTAINER].id && Game.getObjectById(info()[STRUCTURE_CONTAINER].id) )
+    if ( info()[STRUCTURE_CONTAINER].id && Game.getObjectById(info()[STRUCTURE_CONTAINER].id) && !info()[STRUCTURE_LINK].id )
         A.res.registerSource(roomName, RESOURCE_ENERGY, info()[STRUCTURE_CONTAINER].id )
 
     function gotoSource( name: string ) {
@@ -86,14 +88,17 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         }
         
         /** 即将消亡, 则逃离原位置 */
-        if ( creep.ticksToLive <= 1 ) {
-            creep.travelTo( source, { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+        if ( creep.ticksToLive < 3 ) {
+            creep.travelTo( source, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
             return A.proc.OK_STOP_CURRENT
         }
         
         if ( source.energy === 0 ) {
-            // 无能量时, 同样睡眠
-            if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) return A.proc.STOP_SLEEP
+            // 无能量时, 离开工作位置, 同样睡眠
+            if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) {
+                // creep.travelTo( source, { flee: true, ignoreCreeps: false, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                return A.proc.STOP_SLEEP
+            } else return A.proc.OK_STOP_NEXT
         }
 
         /** 移动到 Container 的位置 */
@@ -140,6 +145,7 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
             if ( structure ) {
                 info()[STRUCTURE_LINK].id = structure.id as Id<StructureLink>
                 A.proc.signal.Ssignal({ signalId: linkSignalId, request: 1 })
+                A.res.removeSource(roomName, RESOURCE_ENERGY, info()[STRUCTURE_CONTAINER].id)
             } else {
                 const constructionSite = Game.rooms[roomName].lookForAt(LOOK_CONSTRUCTION_SITES, linkPos)[0]
                 if ( constructionSite && constructionSite.structureType === STRUCTURE_LINK ) {
@@ -153,6 +159,7 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
                 if ( !constructionSite && structures.length + constructionSites.length < CONTROLLER_STRUCTURES[STRUCTURE_LINK][Game.rooms[roomName].controller.level] ) {
                     Game.rooms[roomName].createConstructionSite( linkPos, STRUCTURE_LINK )
                     buildPos = linkPos
+                    A.res.removeSource(roomName, RESOURCE_ENERGY, info()[STRUCTURE_CONTAINER].id)
                     return [ A.proc.OK_STOP_CUSTOM, 'buildLinkOrContainer' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
                 }
             }
@@ -181,7 +188,7 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         const containerPos = new RoomPosition(info()[STRUCTURE_CONTAINER].pos.x, info()[STRUCTURE_CONTAINER].pos.y, roomName)
 
         /** 即将消亡, 则逃离原位置 */
-        if ( creep.ticksToLive < 2 || creep.hits < creep.hitsMax ) {
+        if ( creep.ticksToLive < 3 || creep.hits < creep.hitsMax ) {
             creep.travelTo( containerPos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
             return A.proc.OK_STOP_CURRENT
         }
@@ -213,6 +220,14 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
             return [ A.proc.OK_STOP_CUSTOM, 'repairLinkOrContainer' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
         }
 
+        // 触发能量贮存
+        if ( A.res.query(info()[STRUCTURE_CONTAINER].id, RESOURCE_ENERGY) > CONTAINER_CAPACITY / 2 && Game.rooms[roomName].storage && A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) > CONTAINER_CAPACITY / 4 && A.res.query(Game.rooms[roomName].storage.id, RESOURCE_ENERGY) < getMaintainAmount(RESOURCE_ENERGY) ) {
+            const amount = CONTAINER_CAPACITY / 4
+            assertWithMsg( A.res.request({ id: info()[STRUCTURE_CONTAINER].id, resourceType: RESOURCE_ENERGY, amount }) === A.proc.OK )
+            assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount }) === A.proc.OK )
+            T.transfer( Game.getObjectById(info()[STRUCTURE_CONTAINER].id), Game.rooms[roomName].storage, RESOURCE_ENERGY, amount, { priority: T.PRIORITY_CASUAL } )
+        }
+
         // -> Transfer 到 Container 中
         if ( A.res.query(info()[STRUCTURE_CONTAINER].id, A.res.CAPACITY) > 0 ) {
             const amount = Math.min(A.res.query(info()[STRUCTURE_CONTAINER].id, A.res.CAPACITY), creep.store.getUsedCapacity(RESOURCE_ENERGY))
@@ -231,6 +246,12 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
             C.cancel(name)
             harvesterName = null
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
+        }
+
+        /** 即将消亡, 则逃离原位置 */
+        if ( creep.ticksToLive < 3 ) {
+            creep.travelTo( repairPos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+            return A.proc.OK_STOP_CURRENT
         }
 
         const constructionSite = Game.rooms[roomName].lookForAt(LOOK_CONSTRUCTION_SITES, buildPos)[0]
@@ -254,7 +275,7 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         }
 
         /** 即将消亡, 则逃离原位置 */
-        if ( creep.ticksToLive <= 1 ) {
+        if ( creep.ticksToLive < 3 ) {
             creep.travelTo( repairPos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
             return A.proc.OK_STOP_CURRENT
         }

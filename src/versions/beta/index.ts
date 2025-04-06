@@ -2,9 +2,11 @@ import { Apollo as A } from '@/framework/apollo'
 import { creepModule as C } from '@/modules/creep'
 import { planModule as P, Unit } from '@/modules/plan'
 import { transferModule as T } from '@/modules/transfer'
-import { assertWithMsg, calcBodyEffectiveness, getAvailableSurroundingPos, log, LOG_DEBUG, LOG_INFO } from '@/utils'
+import { assertWithMsg, calcBodyEffectiveness, getAvailableSurroundingPos, log, LOG_DEBUG, LOG_INFO, stackLog } from '@/utils'
 import { registerCommonConstructions } from './config.construction'
+import { registerProduction } from './config.production'
 import { issueHarvestSource, registerHarvestSource } from './modules/harvestSource'
+import { issueCentralTransfer, registerCentralTransfer } from './modules/centralTransfer'
 import { isBelongingToQuickEnergyFilling, issueQuickEnergyFill, registerQuickEnergyFill } from './modules/quickEnergyFill'
 import { mountAllPrototypes } from './prototypes'
 
@@ -24,11 +26,11 @@ function getEnergy(roomName: string, getWorkerName: () => string, setWorkerName:
             setWorkerName(null)
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
         }
-        /** 最后一秒, 空置 */
-        if ( creep.ticksToLive < C.MINIMUM_TICKS_TO_LIVE ) {
-            C.release(name)
-            setWorkerName(null)
-            return [A.proc.STOP_ERR, `Creep [${name}] 消亡`] as [ typeof A.proc.STOP_ERR, string ]
+        /** 最后几秒, 撤离 */
+        if ( creep.ticksToLive < 3 ) {
+            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
+                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+            return A.proc.OK_STOP_CURRENT
         }
 
         /** 已经装满 Energy */
@@ -44,7 +46,7 @@ function getEnergy(roomName: string, getWorkerName: () => string, setWorkerName:
         }
 
         if ( targetId === null ) {
-            targetId = A.res.requestSource(roomName, RESOURCE_ENERGY, creep.pos, false).id
+            targetId = A.res.requestSource(roomName, RESOURCE_ENERGY, CARRY_CAPACITY, creep.pos, false).id
             if ( !targetId || A.res.query(targetId, RESOURCE_ENERGY) <= 0 ) {
                 // Source 旁边的空位应当 > 1
                 const source = creep.pos.findClosestByRange(FIND_SOURCES, { filter: s => s.energy > 0 && getAvailableSurroundingPos(s.pos).length > 1 })
@@ -88,10 +90,11 @@ function issueUpgradeProc(roomName: string) {
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
         }
 
-        if ( creep.ticksToLive < C.MINIMUM_TICKS_TO_LIVE ) {
-            C.release(name)
-            workerName = null
-            return [A.proc.STOP_ERR, `Creep [${name}] 消亡`] as [ typeof A.proc.STOP_ERR, string ]
+        /** 最后几秒, 撤离 */
+        if ( creep.ticksToLive < 3 ) {
+            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
+                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+            return A.proc.OK_STOP_CURRENT
         }
 
         const controller = Game.rooms[roomName].controller
@@ -111,10 +114,11 @@ function issueUpgradeProc(roomName: string) {
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
         }
 
-        if ( creep.ticksToLive < C.MINIMUM_TICKS_TO_LIVE ) {
-            C.release(name)
-            workerName = null
-            return [A.proc.STOP_ERR, `Creep [${name}] 消亡`] as [ typeof A.proc.STOP_ERR, string ]
+        /** 最后几秒, 撤离 */
+        if ( creep.ticksToLive < 3 ) {
+            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
+                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+            return A.proc.OK_STOP_CURRENT
         }
 
         const controller = Game.rooms[roomName].controller
@@ -147,10 +151,11 @@ function issueFillProc(roomName: string) {
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
         }
 
-        if ( creep.ticksToLive < C.MINIMUM_TICKS_TO_LIVE ) {
-            C.release(name)
-            workerName = null
-            return [A.proc.STOP_ERR, `Creep [${name}] 消亡`] as [ typeof A.proc.STOP_ERR, string ]
+        /** 最后几秒, 撤离 */
+        if ( creep.ticksToLive < 3 ) {
+            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
+                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+            return A.proc.OK_STOP_CURRENT
         }
 
         /** 确认房间位置 */
@@ -227,10 +232,11 @@ function issueBuildProc(roomName: string) {
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
         }
 
-        if ( creep.ticksToLive < C.MINIMUM_TICKS_TO_LIVE ) {
-            C.release(name)
-            workerName = null
-            return [A.proc.STOP_ERR, `Creep [${name}] 消亡`] as [ typeof A.proc.STOP_ERR, string ]
+        /** 最后几秒, 撤离 */
+        if ( creep.ticksToLive < 3 ) {
+            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
+                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+            return A.proc.OK_STOP_CURRENT
         }
 
         if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) return A.proc.OK
@@ -275,9 +281,26 @@ function issueBuildProc(roomName: string) {
         if ( Game.rooms[roomName].getEventLog().filter(e => e.event === EVENT_OBJECT_DESTROYED && e.data.type !== 'creep' ).length > 0 ) {
             // 建筑被摧毁时, 重新开始规划.
             // 因为可能建筑布局一样, 然后该房间已经被注册被完整的建造完成了.
+            stackLog(`${Game.time}: 发现有建筑被摧毁`)
             restart = true;
             return true;
         } else return false;
+    }, [ pid ])
+
+    let lastTriggerTick = Game.time
+    let lastRampartMinHit = _.min(Game.rooms[roomName].find(FIND_STRUCTURES, { filter: { structureType: STRUCTURE_RAMPART } }).map(v => v.hits))
+    /** 定时触发 Build */
+    // Rampart Decay 不触发建筑被摧毁事件.
+    // 有不同的方法来解决建筑生命周期追踪, 以为是否需要重建服务.
+    // 但是开销相对较大, 不如定时重新触发.
+    A.proc.trigger('watch', () => {
+        if ( !(roomName in Game.rooms) ) return false
+        if ( Game.time - lastTriggerTick > Math.max(lastRampartMinHit / RAMPART_DECAY_AMOUNT * RAMPART_DECAY_TIME, CREEP_LIFE_TIME) ) {
+            lastTriggerTick = Game.time
+            lastRampartMinHit = _.min(Game.rooms[roomName].find(FIND_STRUCTURES, { filter: { structureType: STRUCTURE_RAMPART } }).map(v => v.hits))
+            restart = true
+            return true
+        } else return false
     }, [ pid ])
 }
 
@@ -304,10 +327,11 @@ function issueRepairProc(roomName: string) {
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
         }
 
-        if ( creep.ticksToLive < C.MINIMUM_TICKS_TO_LIVE ) {
-            C.release(name)
-            workerName = null
-            return [A.proc.STOP_ERR, `Creep [${name}] 消亡`] as [ typeof A.proc.STOP_ERR, string ]
+        /** 最后几秒, 撤离 */
+        if ( creep.ticksToLive < 3 ) {
+            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
+                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+            return A.proc.OK_STOP_CURRENT
         }
 
         if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) {
@@ -373,10 +397,11 @@ function issuePaintProc(roomName: string) {
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
         }
 
-        if ( creep.ticksToLive < C.MINIMUM_TICKS_TO_LIVE ) {
-            C.release(name)
-            workerName = null
-            return [A.proc.STOP_ERR, `Creep [${name}] 消亡`] as [ typeof A.proc.STOP_ERR, string ]
+        /** 最后几秒, 撤离 */
+        if ( creep.ticksToLive < 3 ) {
+            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
+                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+            return A.proc.OK_STOP_CURRENT
         }
 
         if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) {
@@ -447,7 +472,7 @@ function issueTowerProc(roomName: string) {
 
             towers.forEach(tower => {
                 if ( A.res.query(tower.id, A.res.CAPACITY) >= TOWER_CAPACITY / 2 ) {
-                    const requestedSource = A.res.requestSource(roomName, RESOURCE_ENERGY)
+                    const requestedSource = A.res.requestSource(roomName, RESOURCE_ENERGY, CARRY_CAPACITY, tower.pos, false)
                     if ( requestedSource.code === A.proc.OK ) {
                         const sourceId = requestedSource.id
                         const amount = Math.min(A.res.query(tower.id, A.res.CAPACITY), A.res.query(sourceId, RESOURCE_ENERGY))
@@ -472,13 +497,20 @@ export function registerAll() {
 
     /** 建筑规划 */
     registerCommonConstructions()
+    /** 生产规划 */
+    registerProduction()
     /** Source Harvest 模块 */
     registerHarvestSource()
     /** Quick Energy Filling 模块 */
     registerQuickEnergyFill()
+    /** Central Transfer 模块 */
+    registerCentralTransfer()
 
     C.design('worker', {
-        body: [ WORK, CARRY, MOVE ], 
+        body: {
+            1: [ CARRY, WORK, MOVE ], 
+            3: [ CARRY, CARRY, WORK, WORK, MOVE, MOVE ]
+        }, 
         amount: 5, 
     });
 
@@ -506,7 +538,7 @@ export function registerAll() {
         }, [roomName, { cache: null }], `可视化房间自动规划布局 ${roomName}`, 1)
 
         /** 资源状态输出 */
-        A.timer.add(Game.time + 1, roomName => A.res.print(roomName), [roomName], `输出房间 ${roomName} 资源状态`, 1)
+        // A.timer.add(Game.time + 1, roomName => A.res.print(roomName), [roomName], `输出房间 ${roomName} 资源状态`, 1)
 
         issueUpgradeProc(roomName)
         issueFillProc(roomName)
@@ -521,6 +553,8 @@ export function registerAll() {
         issueHarvestSource(roomName, () => targetLinkLists, hasTargetLinkSignal)
         /** Quick Energy Filling 模块 */
         issueQuickEnergyFill(roomName, () => targetLinkLists, hasTargetLinkSignal)
+        /** Central Transfer 模块 */
+        issueCentralTransfer(roomName, () => targetLinkLists, hasTargetLinkSignal)
 
         /** 监测 TombStone */
         // ...
