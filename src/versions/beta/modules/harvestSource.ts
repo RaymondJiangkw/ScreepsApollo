@@ -89,7 +89,7 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         
         /** 即将消亡, 则逃离原位置 */
         if ( creep.ticksToLive < 3 ) {
-            creep.travelTo( source, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+            creep.travelTo( source, { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
             return A.proc.OK_STOP_CURRENT
         }
         

@@ -44,7 +44,7 @@ export function log(level: LOG_LEVEL, ...args): void {
 export function stackError(message: string): void {
     if ( !('_err' in Memory) ) (Memory as any)._err = [];
     // if ( (Memory as any)._err.indexOf(message) === -1 )
-    (Memory as any)._err.push(message)
+    if ( (Memory as any)._err.length === 0 ) (Memory as any)._err.push(message)
 }
 
 export function stackLog(message: string): void {

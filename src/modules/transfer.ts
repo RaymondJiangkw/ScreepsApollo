@@ -25,6 +25,7 @@ type TransferTaskDescription = {
     afterSignalId?  : string, 
     loseCallback?   : (amount: number, resourceType: ResourceConstant) => void, 
     finishWithdraw  : boolean, 
+    allowLooseGrouping?: boolean
 }
 
 interface TransferOpts {
@@ -105,14 +106,29 @@ class TransferModule {
                             // 此时 targetDict 应当为空
                             assertWithMsg( !!getCurrentTransferTask(), `'moveToSource'时 Creep 消失, 应当仍然有任务` )
                             assertWithMsg( Object.keys(targetDict).length === 0, `'moveToSource'时 Creep 消失, 应当不携带任何资源` )
-                            insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
-                            A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
+                            // 尝试合并
+                            let find = false
+                            for ( const t of this.#getTaskQueue(roomName).queue ) {
+                                if ( t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || t.loseCallback === getCurrentTransferTask().loseCallback ) ) {
+                                    for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
+                                        const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
+                                        if ( !!c ) c.amount += amount
+                                        else t.content.push({ resourceType, amount })
+                                    }
+                                    find = true
+                                    break
+                                }
+                            }
+                            if ( !find ) {
+                                insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
+                                A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
+                            }
                             setCurrentTransferTack( null )
                             return [A.proc.STOP_ERR, `Creep [${workerName}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
                         }
 
                         if ( creep.pos.roomName !== getCurrentTransferTask().fromPos.roomName || creep.pos.getRangeTo(getCurrentTransferTask().fromPos.x, getCurrentTransferTask().fromPos.y) > 1 ) {
-                            creep.travelTo(new RoomPosition(getCurrentTransferTask().fromPos.x, getCurrentTransferTask().fromPos.y, getCurrentTransferTask().fromPos.roomName))
+                            creep.moveTo(new RoomPosition(getCurrentTransferTask().fromPos.x, getCurrentTransferTask().fromPos.y, getCurrentTransferTask().fromPos.roomName))
                             return A.proc.OK_STOP_CURRENT
                         }
                         // 检验 afterSignal
@@ -149,8 +165,23 @@ class TransferModule {
                                 }
                             }
                             if ( !getCurrentTransferTask().finishWithdraw ) {
-                                insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
-                                A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
+                                // 尝试合并
+                                let find = false
+                                for ( const t of this.#getTaskQueue(roomName).queue ) {
+                                    if ( t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || t.loseCallback === getCurrentTransferTask().loseCallback ) ) {
+                                        for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
+                                            const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
+                                            if ( !!c ) c.amount += amount
+                                            else t.content.push({ resourceType, amount })
+                                        }
+                                        find = true
+                                        break
+                                    }
+                                }
+                                if ( !find ) {
+                                    insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
+                                    A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
+                                }
                             }
                             
                             targetDict = {}
@@ -216,8 +247,23 @@ class TransferModule {
                                 }
                             }
                             if ( !getCurrentTransferTask().finishWithdraw ) {
-                                insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
-                                A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
+                                // 尝试合并
+                                let find = false
+                                for ( const t of this.#getTaskQueue(roomName).queue ) {
+                                    if ( t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || t.loseCallback === getCurrentTransferTask().loseCallback ) ) {
+                                        for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
+                                            const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
+                                            if ( !!c ) c.amount += amount
+                                            else t.content.push({ resourceType, amount })
+                                        }
+                                        find = true
+                                        break
+                                    }
+                                }
+                                if ( !find ) {
+                                    insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
+                                    A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
+                                }
                             }
                             
                             targetDict = {}
@@ -229,7 +275,7 @@ class TransferModule {
                         if ( creep.ticksToLive === 1 ) return A.proc.OK_STOP_CURRENT
 
                         if ( creep.pos.roomName !== getCurrentTransferTask().toPos.roomName || creep.pos.getRangeTo(getCurrentTransferTask().toPos.x, getCurrentTransferTask().toPos.y) > 1) {
-                            creep.travelTo(new RoomPosition(getCurrentTransferTask().toPos.x, getCurrentTransferTask().toPos.y, getCurrentTransferTask().toPos.roomName))
+                            creep.moveTo(new RoomPosition(getCurrentTransferTask().toPos.x, getCurrentTransferTask().toPos.y, getCurrentTransferTask().toPos.roomName))
                             return A.proc.OK_STOP_CURRENT
                         }
 
@@ -259,8 +305,23 @@ class TransferModule {
                         workerName = null
                         targetDict = {}
                         if ( !getCurrentTransferTask().finishWithdraw ) {
-                            insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
-                            A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
+                            // 尝试合并
+                            let find = false
+                            for ( const t of this.#getTaskQueue(roomName).queue ) {
+                                if ( t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || t.loseCallback === getCurrentTransferTask().loseCallback ) ) {
+                                    for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
+                                        const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
+                                        if ( !!c ) c.amount += amount
+                                        else t.content.push({ resourceType, amount })
+                                    }
+                                    find = true
+                                    break
+                                }
+                            }
+                            if ( !find ) {
+                                insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
+                                A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
+                            }
                         }
                         setCurrentTransferTack( null )
                         return [ A.proc.OK_STOP_CUSTOM, 'start' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
@@ -303,6 +364,7 @@ class TransferModule {
                     priority: opts.priority, afterSignalId: opts.afterSignalId, 
                     loseCallback: opts.loseCallback, 
                     finishWithdraw: false, id: generate_random_hex(8), 
+                    allowLooseGrouping: opts.allowLooseGrouping
                 }
                 log(LOG_DEBUG, `运输任务 从 ${from.id} 到 ${to.id} 运输 ${resourceType} (${amount})`)
                 // 判定 TakeOver

@@ -58,7 +58,7 @@ function getEnergy(roomName: string, getWorkerName: () => string, setWorkerName:
 
         const target = Game.getObjectById(targetId)
         if ( creep.pos.getRangeTo(target) > 1 ) {
-            creep.travelTo(target)
+            creep.moveTo(target)
             return A.proc.OK_STOP_CURRENT
         }
 
@@ -101,7 +101,7 @@ function issueUpgradeProc(roomName: string) {
         /** 已经接近 Controller */
         if ( creep.pos.roomName === roomName && creep.pos.getRangeTo(controller) <= 3 ) return A.proc.OK
 
-        creep.travelTo(controller)
+        creep.moveTo(controller)
         return A.proc.OK_STOP_CURRENT
     }
 
@@ -180,7 +180,7 @@ function issueFillProc(roomName: string) {
             return A.proc.OK_STOP_NEXT
         }
 
-        creep.travelTo(spawn)
+        creep.moveTo(spawn)
         return A.proc.OK_STOP_CURRENT
     }
 
@@ -250,7 +250,7 @@ function issueBuildProc(roomName: string) {
                 constructionSite = null
                 return [ A.proc.OK_STOP_CUSTOM, 'getConstructionSite' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
             }
-        } else creep.travelTo(constructionSite.pos)
+        } else creep.moveTo(constructionSite.pos)
 
         return A.proc.OK_STOP_CURRENT
     }
@@ -349,7 +349,7 @@ function issueRepairProc(roomName: string) {
                 repairedPos = null
                 return [ A.proc.OK_STOP_CUSTOM, 'getRepairedPos' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
             }
-        } else creep.travelTo(repairedPos)
+        } else creep.moveTo(repairedPos)
 
         return A.proc.OK_STOP_CURRENT
     }
@@ -419,7 +419,7 @@ function issuePaintProc(roomName: string) {
                 repairedPos = null
                 return [ A.proc.OK_STOP_CUSTOM, 'getRepairedPos' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
             }
-        } else creep.travelTo(repairedPos)
+        } else creep.moveTo(repairedPos)
 
         return A.proc.OK_STOP_CURRENT
     }
@@ -459,7 +459,7 @@ function issueTowerProc(roomName: string) {
                 if ( A.res.query(tower.id, RESOURCE_ENERGY) >= TOWER_ENERGY_COST  ) {
                     if ( enemies.length > 0 ) {
                         assertWithMsg( A.res.request({ id: tower.id, resourceType: RESOURCE_ENERGY, amount: TOWER_ENERGY_COST }, 'issueTowerProc -> 396') === A.proc.OK )
-                        A.timer.add(Game.time + 1, id => A.res.signal(id, A.res.CAPACITY, TOWER_ENERGY_COST), [ tower.id ], `更新塔 ${tower.id} 的容量`)
+                        A.timer.add(Game.time + 1, id => A.res.signal(id, A.res.CAPACITY_ENERGY, TOWER_ENERGY_COST), [ tower.id ], `更新塔 ${tower.id} 的容量`)
                         tower.attack(enemies[0])
                     }
                     // } else if ( ramparts.length > 0 ) {
