@@ -1,11 +1,16 @@
 {
     "compilerOptions": {
         "target": "es2017",
-        "moduleResolution": "Node", 
+        "ignoreDeprecations": "6.0", 
+        "moduleResolution": "node", 
         "outDir": "dist/",
         "baseUrl": "./",
         "sourceMap": true,
         "allowSyntheticDefaultImports": true,
+        "allowUmdGlobalAccess": true, 
+        "types": ["screeps", "lodash"], 
+        "strictNullChecks": false,
+        "noImplicitAny": false,
         "paths": {
             "@/*": ["./src/*"],
             "@apollo/*": ["./src/framework/*"], 

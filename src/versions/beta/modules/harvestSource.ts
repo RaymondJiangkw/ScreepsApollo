@@ -88,7 +88,7 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         }
         
         /** 即将消亡, 则逃离原位置 */
-        if ( creep.ticksToLive < 3 ) {
+        if ( creep.ticksToLive < 5 ) {
             creep.travelTo( source, { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
             return A.proc.OK_STOP_CURRENT
         }
@@ -188,8 +188,8 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         const containerPos = new RoomPosition(info()[STRUCTURE_CONTAINER].pos.x, info()[STRUCTURE_CONTAINER].pos.y, roomName)
 
         /** 即将消亡, 则逃离原位置 */
-        if ( creep.ticksToLive < 3 || creep.hits < creep.hitsMax ) {
-            creep.travelTo( containerPos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+        if ( creep.ticksToLive < 5 || creep.hits < creep.hitsMax ) {
+            creep.travelTo( Game.getObjectById(sourceId), { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
             return A.proc.OK_STOP_CURRENT
         }
 
@@ -249,8 +249,8 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         }
 
         /** 即将消亡, 则逃离原位置 */
-        if ( creep.ticksToLive < 3 ) {
-            creep.travelTo( repairPos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+        if ( creep.ticksToLive < 5 ) {
+            creep.travelTo( Game.getObjectById(sourceId), { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
             return A.proc.OK_STOP_CURRENT
         }
 
@@ -275,8 +275,8 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         }
 
         /** 即将消亡, 则逃离原位置 */
-        if ( creep.ticksToLive < 3 ) {
-            creep.travelTo( repairPos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+        if ( creep.ticksToLive < 5 ) {
+            creep.travelTo( Game.getObjectById(sourceId), { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
             return A.proc.OK_STOP_CURRENT
         }
 

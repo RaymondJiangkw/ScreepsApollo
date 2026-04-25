@@ -733,7 +733,7 @@ class ProcessModule {
     /** 监视类触发, 当条件 (同 tick 内稳定) 由假变为真时, 唤醒休眠中进程 */
     trigger( token: 'watch', func: () => boolean, wakeUpProcIdList: ProcId[] ): void
     /** 执行类触发, 当特定函数执行 (通常为原型上函数) 后, 触发特定函数 */
-    trigger( token: 'after', prototype: Object, funcName: string, afterFunc: ( returnValue: any, subject: Object, ...args ) => ProcId[] ): void
+    trigger( token: 'after', prototype: Object, funcName: string, afterFunc: ( returnValue: any, subject: any, ...args ) => ProcId[] ): void
     trigger( token, arg1, arg2, arg3?) {
         if ( token === 'watch' ) {
             this.#watchList.push({

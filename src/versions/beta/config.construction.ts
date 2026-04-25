@@ -1,5 +1,18 @@
 import { planModule as P, Unit } from '@/modules/plan'
-import { getMyRooms } from '@/utils'
+import { assertWithMsg, getMyRooms } from '@/utils'
+
+export function registerCustomConstructions(roomName: string) {
+    /** @NOTICE 需要 room 视野规划 */
+    const room = Game.rooms[roomName]
+    assertWithMsg( !!room, `需要 ${roomName} 视野以进行规划` )
+    P.register('road', `${roomName}: centralSpawn => Controller`, 'centralSpawn', room.controller.pos, { range: 1 })
+    room.find(FIND_SOURCES).forEach(source => P.register('road', `${roomName}: centralSpawn => Source ${source.id}`, 'centralSpawn', source.pos, { range: 1 }))
+    room.find(FIND_MINERALS).forEach(mineral => {
+        P.register('road', `${roomName}: centralSpawn => Mineral ${mineral.id}`, 'centralSpawn', mineral.pos, { range: 1 })
+        P.register('unit', `${roomName}: extractor`, new Unit([ [STRUCTURE_EXTRACTOR] ], { 'extractor': [ [0, 0] ] }), { on: mineral.pos, freeFromProtect: true })
+        P.register('unit', `${roomName}: mineral's container`, new Unit([ [STRUCTURE_CONTAINER] ], { 'container': [ [0, 0] ] }), { aroundRelationship: mineral.pos, freeFromProtect: true })
+    })
+}
 
 export function registerCommonConstructions() {
     /** @NOTICE 对于第一个房间, `centralSpawn` 的位置需要检测指定 */

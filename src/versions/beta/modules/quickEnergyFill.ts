@@ -240,8 +240,8 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
         const structures = Game.rooms[roomName]
             .lookForAtArea(LOOK_STRUCTURES, top, left, bottom, right, true)
             .map(s => s.structure)
-            .filter((s: StorableStructure) => (s.structureType === STRUCTURE_EXTENSION || s.structureType === STRUCTURE_SPAWN) && s.store.getFreeCapacity(RESOURCE_ENERGY) > (issuedTransferFor[convertPosToString(s.pos)] || 0) )
-            .sort((u: StorableStructure, v: StorableStructure) => (u.store.getFreeCapacity(RESOURCE_ENERGY) - (issuedTransferFor[convertPosToString(u.pos)] || 0)) - (v.store.getFreeCapacity(RESOURCE_ENERGY) - (issuedTransferFor[convertPosToString(v.pos)] || 0))) as (StructureSpawn | StructureExtension)[]
+            .filter((s) => (s.structureType === STRUCTURE_EXTENSION || s.structureType === STRUCTURE_SPAWN) && (s as StorableStructure).store.getFreeCapacity(RESOURCE_ENERGY) > (issuedTransferFor[convertPosToString(s.pos)] || 0) )
+            .sort((u, v) => ((u as StorableStructure).store.getFreeCapacity(RESOURCE_ENERGY) - (issuedTransferFor[convertPosToString(u.pos)] || 0)) - ((v as StorableStructure).store.getFreeCapacity(RESOURCE_ENERGY) - (issuedTransferFor[convertPosToString(v.pos)] || 0))) as (StructureSpawn | StructureExtension)[]
         log(LOG_DEBUG, `${roomName} => 需要快速填充的建筑: ${structures}; Top Pool [${A.proc.signal.getValue(TopSignal)}]: ${JSON.stringify(TopPool)}; Bottom Pool [${A.proc.signal.getValue(BottomSignal)}]: ${JSON.stringify(BottomPool)}`)
         /** 强制唤醒 Creep 填充进程 */
         assertWithMsg( A.proc.signal.Ssignal( { signalId: TopSignal, request: 0 }, { signalId: BottomSignal, request: 0 } ) === A.proc.OK )

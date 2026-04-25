@@ -155,3 +155,23 @@ export function calcBodyEffectiveness(body: BodyPartDefinition[], bodyPartType: 
     })
     return power
 }
+
+function roomXY(roomName: string): { x: number; y: number } {
+  const match = roomName.match(/^([WE])(\d+)([NS])(\d+)$/);
+  if (!match) throw new Error(`Invalid room name: ${roomName}`);
+
+  const [, ew, xStr, ns, yStr] = match;
+
+  // W and N are negative, but shifted by 1 because there is no zero gap
+  const x = ew === "E" ? Number(xStr) : -Number(xStr) - 1;
+  const y = ns === "S" ? Number(yStr) : -Number(yStr) - 1;
+
+  return { x, y };
+}
+
+export function roomManhattanDistance(a: string, b: string): number {
+  const A = roomXY(a);
+  const B = roomXY(b);
+
+  return Math.abs(A.x - B.x) + Math.abs(A.y - B.y);
+}
