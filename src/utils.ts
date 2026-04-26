@@ -181,3 +181,9 @@ export function roomManhattanDistance(a: string, b: string): number {
 
   return Math.abs(A.x - B.x) + Math.abs(A.y - B.y);
 }
+
+export function findDistanceTo(u: HasPos | Pos, v: HasPos | Pos | (HasPos | Pos)[]): number[] {
+    if ( !Array.isArray(v) ) v = [ v ]
+    if ( !!(u as HasPos).pos ) u = (u as HasPos).pos
+    return _.map(v, i => new RoomPosition((u as Pos).x, (u as Pos).y, (u as Pos).roomName).getRangeTo(i as (HasPos | RoomPosition)))
+}

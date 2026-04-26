@@ -6,6 +6,7 @@ import { registerQuickEnergyFill } from './modules/quickEnergyFill'
 import { mountAllPrototypes } from './prototypes'
 import { issueClaimRoomWatcher, registerClaimRoom } from './modules/roomClaim'
 import { issueForRoom, registerForRoom } from './room'
+import { registerDefendRoom } from './modules/roomDefense'
 
 /** AI 挂载入口 */
 export function mountAll() {
@@ -30,6 +31,8 @@ export function registerAll() {
     /** Claim Room 模块 */
     registerClaimRoom()
     issueClaimRoomWatcher()
+    /** Defend Room 模块 */
+    registerDefendRoom()
     /** 房间运行模块 */
     registerForRoom()
 

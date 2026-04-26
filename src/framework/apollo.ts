@@ -1084,11 +1084,7 @@ class ResourceModule {
                 if ( requestPos ) {
                     return {
                         code: Apollo.proc.OK, 
-                        id: _.min(sufficientCandidates, id => {
-                            const res = PathFinder.search(requestPos, Game.getObjectById(id).pos)
-                            if ( res.incomplete ) return 0xff
-                            else return res.path.length
-                        })
+                        id: _.min(sufficientCandidates, id => requestPos.getRangeTo(Game.getObjectById(id)))
                     }
                 // 否则, 默认选择最多的
                 } else {

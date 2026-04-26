@@ -8,6 +8,7 @@ import { isBelongingToQuickEnergyFilling, issueQuickEnergyFill } from './modules
 import { registerCustomConstructions } from './config.construction'
 import { issueHarvestSource } from './modules/harvestSource'
 import { issueCentralTransfer } from './modules/centralTransfer'
+import { issueDefendProc } from './modules/roomDefense'
 
 function getEnergy(roomName: string, getWorkerName: () => string, setWorkerName: ( name: string ) => void) {
     let targetId: Id<Source> | Id<StorableStructure> = null
@@ -438,52 +439,6 @@ function issuePaintProc(roomName: string) {
     }, [ pid ])
 }
 
-function issueTowerProc(roomName: string) {
-    A.proc.createProc([
-        () => P.exist(roomName, 'towers', 'tower'), 
-        () => {
-            if ( !Game.rooms[roomName] ) return [A.proc.STOP_ERR, `${roomName} 房间无视野`] as [ typeof A.proc.STOP_ERR, string ]
-            const towers = Game.rooms[roomName].find<FIND_STRUCTURES, StructureTower>(FIND_STRUCTURES, { filter: { structureType: STRUCTURE_TOWER } })
-            if ( towers.length === 0 ) return [A.proc.STOP_ERR, `${roomName} 房间无可用 Tower`] as [ typeof A.proc.STOP_ERR, string ]
-
-            const enemies = Game.rooms[roomName].find(FIND_HOSTILE_CREEPS)
-            // const ramparts = Game.rooms[roomName].find(FIND_STRUCTURES, { filter: { structureType: STRUCTURE_RAMPART } }).filter(s => s.hits < 1e4)
-
-            towers.forEach(tower => {
-                if ( A.res.query(tower.id, RESOURCE_ENERGY) >= TOWER_ENERGY_COST  ) {
-                    if ( enemies.length > 0 ) {
-                        assertWithMsg( A.res.request({ id: tower.id, resourceType: RESOURCE_ENERGY, amount: TOWER_ENERGY_COST }, 'issueTowerProc -> 396') === A.proc.OK )
-                        A.timer.add(Game.time + 1, id => A.res.signal(id, A.res.CAPACITY_ENERGY, TOWER_ENERGY_COST), [ tower.id ], `更新塔 ${tower.id} 的容量`)
-                        tower.attack(enemies[0])
-                    }
-                    // } else if ( ramparts.length > 0 ) {
-                    //     assertWithMsg( A.res.request({ id: tower.id, resourceType: RESOURCE_ENERGY, amount: TOWER_ENERGY_COST }) === A.proc.OK )
-                    //     A.timer.add(Game.time + 1, id => A.res.signal(id, A.res.CAPACITY, TOWER_ENERGY_COST), [ tower.id ], `更新塔 ${tower.id} 的容量`)
-                    //     tower.repair( _.min(ramparts, rampart => rampart.hits) )
-                    // }
-                }
-            })
-
-            towers.forEach(tower => {
-                if ( A.res.query(tower.id, A.res.CAPACITY_ENERGY) >= TOWER_CAPACITY / 2 ) {
-                    const requestedSource = A.res.requestSource(roomName, RESOURCE_ENERGY, CARRY_CAPACITY, tower.pos, false)
-                    if ( requestedSource.code === A.proc.OK ) {
-                        const sourceId = requestedSource.id
-                        const amount = Math.min(A.res.query(tower.id, A.res.CAPACITY_ENERGY), A.res.query(sourceId, RESOURCE_ENERGY))
-                        if ( amount > 0 ) {
-                            assertWithMsg( A.res.request({ id: tower.id, resourceType: A.res.CAPACITY_ENERGY, amount }) === A.proc.OK, `issueTowerProc -> 415` )
-                            assertWithMsg( A.res.request({ id: sourceId, resourceType: RESOURCE_ENERGY, amount }) === A.proc.OK, `issueTowerProc -> 416` )
-                            T.transfer( sourceId, tower.id, RESOURCE_ENERGY, amount )
-                        }
-                    }
-                }
-            })
-
-            return A.proc.OK_STOP_CURRENT
-        }
-    ], `${roomName} => Tower`)
-}
-
 export function registerForRoom() {
     C.design('worker', {
         body: {
@@ -520,7 +475,7 @@ export function issueForRoom(roomName: string) {
     issueBuildProc(roomName)
     issueRepairProc(roomName)
     issuePaintProc(roomName)
-    issueTowerProc(roomName)
+    issueDefendProc(roomName)
 
     /** Source Harvest 模块 */
     const targetLinkLists: Id<StructureLink>[] = [] // Source 处 Link 传递能量目标 Link 列表 & 信号量
