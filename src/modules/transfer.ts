@@ -79,6 +79,10 @@ class TransferModule {
                         if ( !creep ) {
                             C.cancel(workerName)
                             workerName = null
+
+                            insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
+                            A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
+                            setCurrentTransferTack(null)
                             return [A.proc.STOP_ERR, `Creep [${workerName}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
                         }
                         if ( creep.store.getUsedCapacity() === 0 ) return A.proc.OK
@@ -211,19 +215,20 @@ class TransferModule {
 
                         /** 确定运输的种类和数量 & 确定是否运输完成 */
                         let resourceType = getCurrentTransferTask().content[0].resourceType
-                        let amount = Math.min(creep.store.getFreeCapacity(), getCurrentTransferTask().content[0].amount)
+                        let prevCapacity = creep.store.getFreeCapacity()
+                        let amount = Math.min(prevCapacity, getCurrentTransferTask().content[0].amount)
                         assertWithMsg( amount >= 0 && amount <= (source.store[resourceType] || 0), `取资源时, ${source} 应至少有 ${amount} ${resourceType} 但只有 ${source.store[resourceType] || 0}.` )
                         assertWithMsg( creep.withdraw(source, resourceType, amount) === OK )
                         A.timer.add(Game.time + 1, (sourceId, capacityType, amount) => A.res.signal(sourceId, capacityType, amount), [source.id, A.res.describeCapacity(source, resourceType), amount], `取资源后, 更新源建筑的容量`)
 
                         getCurrentTransferTask().content[0].amount -= amount
-                        targetDict[resourceType] = amount
+                        targetDict[resourceType] = ( targetDict[resourceType] || 0 ) + amount
                         if ( getCurrentTransferTask().content[0].amount === 0 ) {
                             getCurrentTransferTask().content.shift()
                             getCurrentTransferTask().finishWithdraw = getCurrentTransferTask().content.length === 0
                         }
 
-                        if ( getCurrentTransferTask().finishWithdraw || creep.store.getFreeCapacity() === amount ) return A.proc.OK_STOP_NEXT
+                        if ( getCurrentTransferTask().finishWithdraw || prevCapacity === amount ) return A.proc.OK_STOP_NEXT
                         else return A.proc.OK_STOP_CURRENT
                     } ], 
                     ['moveToTarget', () => {

@@ -635,6 +635,6 @@ export function mountCreepTravelTo() {
     };
 
     PowerCreep.prototype.travelTo = function(destination: RoomPosition|{pos: RoomPosition}, options?: TravelToOptions) {
-        return Traveler.travelTo(this, destination, options);
+        return Traveler.travelTo(this as any as Creep, destination, options);
     };
 }

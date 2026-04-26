@@ -38,7 +38,7 @@ export function registerAll() {
     
     for ( const roomName in Game.rooms ) {
         const room = Game.rooms[roomName]
-        if ( !room.controller || !room.controller.my ) continue
+        if ( !room.controller || !room.controller.my || room.find(FIND_STRUCTURES, { filter: { structureType: STRUCTURE_SPAWN } }).length <= 0 ) continue
         issueForRoom(roomName)
     }
 }

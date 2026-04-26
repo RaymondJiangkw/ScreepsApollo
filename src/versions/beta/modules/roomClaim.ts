@@ -1,5 +1,10 @@
 /**
  * 房间扩张模块
+ * Purple Flag 指示需要扩张的房间
+ * 若 name 为一个符合标准的房间名字, 则指定房间援建
+ * 否则, 默认使用曼哈顿距离选择一个最近符合标准的房间
+ * 
+ * 同一个房间最多援建 2 个房间, 但是不进行检查 (没必要, 手动控制吧)
  */
 
 import { Apollo as A } from "@/framework/apollo"
@@ -9,7 +14,7 @@ import { transferModule as T } from "@/modules/transfer"
 import { assertWithMsg, getMyRooms, log, LOG_ERR, LOG_INFO, roomManhattanDistance } from "@/utils"
 import { issueForRoom } from "../room"
 
-const MIN_CONTROLLER_LEVEL = 4
+const MIN_CONTROLLER_LEVEL = 3
 
 export function registerClaimRoom() {
     C.design('claimer', {
@@ -20,7 +25,7 @@ export function registerClaimRoom() {
     })
 
     C.design('remoteWorker', {
-        amount: 2, 
+        amount: 4, // 最多同时援建 2 个房间
         body: {
             1: [ CARRY, WORK, MOVE, MOVE ], 
             3: [ CARRY, CARRY, WORK, WORK, MOVE, MOVE, MOVE, MOVE ]
@@ -48,12 +53,12 @@ export function issueClaimRoomProc(srcRoomName: string, tarRoomName: string, get
         }
 
         if ( creep.pos.roomName !== tarRoomName ) {
-            creep.travelTo(new RoomPosition(25, 25, tarRoomName))
+            creep.moveTo(new RoomPosition(25, 25, tarRoomName))
             return A.proc.OK_STOP_CURRENT
         }
 
         /** 防止出现特殊情况, 即同一 tick, claim 成功, 唤醒 worker 进程, worker 恰好在房间内, 此时 controller.my 还没更新, 会出现 claim 成功与 controller.my 冲突, 导致进程非正常结束. 所以, 一定从下一 tick 开始 */
-        creep.travelTo(new RoomPosition(25, 25, tarRoomName))
+        creep.moveTo(new RoomPosition(25, 25, tarRoomName))
         return A.proc.OK_STOP_NEXT
     }
 
@@ -78,7 +83,7 @@ export function issueClaimRoomProc(srcRoomName: string, tarRoomName: string, get
             if ( returnCode === OK ) {
                 C.release(name)
                 claimerName = null
-                A.proc.signal.Ssignal({ signalId: claimDone, request: 1 })
+                A.timer.add(Game.time + 1, () => A.proc.signal.Ssignal({ signalId: claimDone, request: 1 }), [], `下一 tick 通知房间 ${tarRoomName} 可以开始升级与建造`)
             } else {
                 log(LOG_ERR, `${tarRoomName} 无法 Claim, 返回值: ${returnCode}`)
                 C.release(name)
@@ -160,7 +165,7 @@ export function issueClaimRoomProc(srcRoomName: string, tarRoomName: string, get
         if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) return A.proc.OK
 
         if ( creep.pos.getRangeTo(controller) > 3 ) {
-            creep.moveTo(controller)
+            creep.travelTo(controller, { range: 3 })
             return A.proc.OK_STOP_CURRENT
         }
 
@@ -217,7 +222,7 @@ export function issueClaimRoomProc(srcRoomName: string, tarRoomName: string, get
         if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) return A.proc.OK
 
         if ( creep.pos.getRangeTo(constructionSite.pos) > 3 ) {
-            creep.moveTo(constructionSite)
+            creep.travelTo(constructionSite, { range: 3 })
             return A.proc.OK_STOP_CURRENT
         }
 
@@ -290,17 +295,22 @@ export function issueClaimRoomWatcher() {
                 }
 
                 // 寻找最合适的邻近房间
-                const myRooms = getMyRooms().filter(r => r.controller.level >= MIN_CONTROLLER_LEVEL)
-                assertWithMsg( myRooms.length > 0, `必定需要至少一个 Controller 等级大于 ${MIN_CONTROLLER_LEVEL} 的房间作为母房间` )
+                let srcRoomName = null
+                if ( Game.rooms[flag.name] && Game.rooms[flag.name].controller && Game.rooms[flag.name].controller.my && Game.rooms[flag.name].controller.level >= MIN_CONTROLLER_LEVEL ) srcRoomName = flag.name
+                else {
+                    const myRooms = getMyRooms().filter(r => r.controller.level >= MIN_CONTROLLER_LEVEL)
+                    assertWithMsg( myRooms.length > 0, `必定需要至少一个 Controller 等级大于 ${MIN_CONTROLLER_LEVEL} 的房间作为母房间` )
 
-                // 使用 Manhattan 距离来选择最近支援房间
-                const srcRoomName = _.min(myRooms, room => roomManhattanDistance(room.name, tarRoomName)).name
+                    // 使用 Manhattan 距离来选择最近支援房间
+                    srcRoomName = _.min(myRooms, room => roomManhattanDistance(room.name, tarRoomName)).name
+                }
+                
                 issuedFlags.push(tarRoomName)
                 issueClaimRoomProc(srcRoomName, tarRoomName, () => issuedFlags, arr => issuedFlags = arr)
             }
             return A.proc.STOP_SLEEP
         }
-    ], `准备 Claim Room 进程`)
+    ], `准备 Claim Room 进程`, true)
 
     A.proc.trigger("watch", () => {
         return _.filter(Game.flags, flag => flag.color === COLOR_PURPLE && !_.includes(issuedFlags, flag.pos.roomName)).length > 0 && _.max(_.map(getMyRooms(), room => room.controller.level)) >= MIN_CONTROLLER_LEVEL

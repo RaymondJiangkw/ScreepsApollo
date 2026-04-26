@@ -108,11 +108,15 @@ interface PlanModuleRegisterUnitOpts {
     amount? : number, 
     /** 不对该区域保护 */
     freeFromProtect? : boolean
+    /** 在 Controller 达到一定等级后才开始建造 */
+    startFromLevel? : number
 }
 
 interface RoadRegisterOpts {
     /** 到目的地的距离设定 */
     range?: number
+    /** 在 Controller 达到一定等级后才开始建造 */
+    startFromLevel? : number
 }
 
 /** 自动规划模块 */
@@ -134,7 +138,7 @@ class PlanModule {
         opts: RoadRegisterOpts, 
     } } = {}
     /** 房间内规划次序 (房间之间的规划默认是优先级低于房间内, 并且之间平级) */
-    #planOrder: { token: 'unit' | 'road', name: string, specializedToRoom: string }[] = []
+    #planOrder: { token: 'unit' | 'road', name: string, specializedToRoom: string, startFromLevel?: number }[] = []
     #getCacheDict() {
         if ( !('_plan' in Memory) ) (Memory as any)._plan = {}
         return (Memory as any)._plan
@@ -254,29 +258,31 @@ class PlanModule {
                 let specializedToRoom = null
                 if ( !!opts.on ) specializedToRoom = opts.on.roomName
                 else if ( !!opts.aroundRelationship ) specializedToRoom = opts.aroundRelationship.roomName
-                this.#planOrder.push({ token: 'unit', name: arg1, specializedToRoom })
+                this.#planOrder.push({ token: 'unit', name: arg1, specializedToRoom, startFromLevel: opts.startFromLevel })
             }
         } else if ( token === 'road' ) {
             if ( arg4 === undefined ) arg4 = {}
             _.defaults( arg4, { range: 0 } )
+            const opts: RoadRegisterOpts = arg4
             let cross = false
             if ( !(arg2 instanceof RoomPosition) && !(arg3 instanceof RoomPosition) ) {
                 // 同房间内连接
                 assertWithMsg( arg2 in this.#unitDict && arg3 in this.#unitDict, `注册路径连接建筑单元 ${arg2} 和 ${arg3}, 但是其中有未注册的建筑单元` )
-                this.#planOrder.push({ token: 'road', name: arg1, specializedToRoom: null })
+                this.#planOrder.push({ token: 'road', name: arg1, specializedToRoom: null, startFromLevel: opts.startFromLevel })
             } else if ( !(arg2 instanceof RoomPosition) && arg3 instanceof RoomPosition ) {
                 // 同房间内连接
                 assertWithMsg( arg2 in this.#unitDict, `注册路径连接建筑单元 ${arg2} 和 ${arg3}, 但是该建筑单元未注册` )
-                this.#planOrder.push({ token: 'road', name: arg1, specializedToRoom: arg3.roomName })
+                this.#planOrder.push({ token: 'road', name: arg1, specializedToRoom: arg3.roomName, startFromLevel: opts.startFromLevel })
             } else if ( arg2 instanceof RoomPosition && arg3 instanceof RoomPosition ) {
                 if ( arg2.roomName === arg3.roomName )
                     // 同房间内连接
-                    this.#planOrder.push({ token: 'road', name: arg1, specializedToRoom: arg3.roomName })
+                    this.#planOrder.push({ token: 'road', name: arg1, specializedToRoom: arg3.roomName, startFromLevel: opts.startFromLevel })
                 else
                     // 跨房间连接
                     cross = true
+                    assertWithMsg( !opts.startFromLevel, `跨房间时, 暂不支持设定达到一定 Controller 等级` )
             }
-            this.#roadDict[ arg1 ] = { unitNameUorPosU: arg2, unitNameVorPosV: arg3, cross, opts: arg4 }
+            this.#roadDict[ arg1 ] = { unitNameUorPosU: arg2, unitNameVorPosV: arg3, cross, opts }
         }
     }
     /** 位置 (0, 0) 到 (x, y) 的空位置数量 */
@@ -843,9 +849,14 @@ class PlanModule {
         else if ( _.includes(this.#getStrictlyBuiltRoom(), roomName) ) return null
 
         while ( this.#room2currentBuildPointer[roomName] < this.#planOrder.length ) {
-            const { token, name, specializedToRoom } = this.#planOrder[ this.#room2currentBuildPointer[roomName] ]
+            const { token, name, specializedToRoom, startFromLevel } = this.#planOrder[ this.#room2currentBuildPointer[roomName] ]
             // 跳过针对其他房间的规划
             if ( typeof specializedToRoom === 'string' && specializedToRoom !== roomName ) {
+                ++this.#room2currentBuildPointer[roomName]
+                continue
+            }
+            // 跳过Controller等级不够的情况
+            if ( !!startFromLevel && Game.rooms[roomName].controller.level < startFromLevel ) {
                 ++this.#room2currentBuildPointer[roomName]
                 continue
             }

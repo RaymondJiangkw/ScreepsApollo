@@ -156,6 +156,12 @@ export function calcBodyEffectiveness(body: BodyPartDefinition[], bodyPartType: 
     return power
 }
 
+function isRoomXY(roomName: string): boolean {
+    const match = roomName.match(/^([WE])(\d+)([NS])(\d+)$/)
+    if (!match) return false;
+    return true;
+}
+
 function roomXY(roomName: string): { x: number; y: number } {
   const match = roomName.match(/^([WE])(\d+)([NS])(\d+)$/);
   if (!match) throw new Error(`Invalid room name: ${roomName}`);

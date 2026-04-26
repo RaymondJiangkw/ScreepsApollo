@@ -10,6 +10,9 @@ import { assertWithMsg, convertPosToString, insertSortedBy, log, LOG_DEBUG } fro
 
 const unitName = 'centralTransfer'
 const tagName = 'transferStructures'
+const MAX_ENERGY_PERCENT = 0.4
+const MIN_FREE_PERCENT = 0.1
+const TRANSFER_UNIT = 200 // 每次运输数量
 
 export function registerCentralTransfer() {
     C.design(`centralTransferer`, {
@@ -169,6 +172,15 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
             if ( !creep ) {
                 C.cancel(workerName)
                 workerName = null
+                // 恢复任务
+                assertWithMsg( Object.keys(targetDict).length === 0, `centralTransfer 传输任务应当无丢失!` )
+                if ( !currentTransferTask.finishWithdraw ) {
+                    insertSortedBy(takeOverQueue.queue, currentTransferTask, 'priority')
+                    A.proc.signal.Ssignal({ signalId: takeOverQueue.lengthSignalId, request: 1 })
+                }
+
+                targetDict = {}
+                currentTransferTask = null
                 return [A.proc.STOP_ERR, `Creep [${workerName}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
             }
             if ( creep.pos.roomName !== posWork.roomName || creep.pos.x !== posWork.x || creep.pos.y !== posWork.y ) {
@@ -220,19 +232,20 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
 
             /** 确定运输的种类和数量 & 确定是否运输完成 */
             let resourceType = currentTransferTask.content[0].resourceType
-            let amount = Math.min(creep.store.getFreeCapacity(), currentTransferTask.content[0].amount)
+            let capacity = creep.store.getFreeCapacity()
+            let amount = Math.min(capacity, currentTransferTask.content[0].amount)
             assertWithMsg( amount >= 0 && amount <= (source.store[resourceType] || 0), `取资源时, ${source} 应至少有 ${amount} ${resourceType} 但只有 ${source.store[resourceType] || 0}.` )
             assertWithMsg( creep.withdraw(source, resourceType, amount) === OK )
             A.timer.add(Game.time + 1, (sourceId, capacityType, amount) => A.res.signal(sourceId, capacityType, amount), [source.id, A.res.describeCapacity(source, resourceType), amount], `取资源后, 更新源建筑的容量`)
 
             currentTransferTask.content[0].amount -= amount
-            targetDict[resourceType] = amount
+            targetDict[resourceType] = (targetDict[resourceType] || 0) + amount
             if ( currentTransferTask.content[0].amount === 0 ) {
                 currentTransferTask.content.shift()
                 currentTransferTask.finishWithdraw = currentTransferTask.content.length === 0
             }
 
-            if ( currentTransferTask.finishWithdraw || creep.store.getFreeCapacity() === amount || creep.ticksToLive === 3 || creep.ticksToLive <= Object.keys(targetDict).length + 1 ) return A.proc.OK_STOP_NEXT
+            if ( currentTransferTask.finishWithdraw || capacity === amount || creep.ticksToLive === 3 || creep.ticksToLive <= Object.keys(targetDict).length + 1 ) return A.proc.OK_STOP_NEXT
             else return A.proc.OK_STOP_CURRENT
         } ], 
         ['transfer', () => {
@@ -242,8 +255,8 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
                 // 释放 Creep
                 C.cancel(workerName)
                 workerName = null
-                // 恢复任务
-                assertWithMsg( Object.keys(targetDict).length === 0, `centralTransfer 传输任务应当无丢失!` )
+                // 恢复任务 (可能被 kill)
+                // assertWithMsg( Object.keys(targetDict).length === 0, `centralTransfer 传输任务应当无丢失!` )
                 if ( !currentTransferTask.finishWithdraw ) {
                     insertSortedBy(takeOverQueue.queue, currentTransferTask, 'priority')
                     A.proc.signal.Ssignal({ signalId: takeOverQueue.lengthSignalId, request: 1 })
@@ -288,9 +301,37 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
     ], `${roomName} => CentralTransfer`)
 }
 
+function issueEnergyStoreProc(roomName: string, leftTopPos: Pos) {
+    const posStorage = new RoomPosition(leftTopPos.x + 1, leftTopPos.y + 1, leftTopPos.roomName)
+    const pid = A.proc.createProc([
+        () => {
+            // 只从 Container 里拿
+            const requestedSource = A.res.requestSource(roomName, RESOURCE_ENERGY, TRANSFER_UNIT, posStorage, false, id => Game.getObjectById(id).structureType === STRUCTURE_CONTAINER)
+
+            if ( !Game.rooms[roomName] || !Game.rooms[roomName].storage || A.res.query(Game.rooms[roomName].storage.id, RESOURCE_ENERGY) >= STORAGE_CAPACITY * MAX_ENERGY_PERCENT || A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) <= STORAGE_CAPACITY * MIN_FREE_PERCENT || !requestedSource.id ) return A.proc.STOP_SLEEP
+
+            const amount = A.res.query(requestedSource.id, RESOURCE_ENERGY)
+            if ( amount < TRANSFER_UNIT )
+                return A.res.request({ id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: {lowerbound: TRANSFER_UNIT, request: 0} })
+
+            const capacity = Math.min(A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY), TRANSFER_UNIT)
+            if ( capacity <= 0 ) return A.proc.STOP_SLEEP
+            assertWithMsg( A.res.request({ id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: capacity }) === A.proc.OK )
+            assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount: capacity }) === A.proc.OK )
+            T.transfer(requestedSource.id, Game.rooms[roomName].storage.id, RESOURCE_ENERGY, capacity, { allowLooseGrouping: true })
+
+            return A.proc.OK_STOP_CURRENT
+        }
+    ], `${roomName} => Energy Store`, true)
+    A.proc.trigger("watch", () => {
+        return !!Game.rooms[roomName] && !!Game.rooms[roomName].storage && A.res.query(Game.rooms[roomName].storage.id, RESOURCE_ENERGY) < STORAGE_CAPACITY * MAX_ENERGY_PERCENT && A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) > STORAGE_CAPACITY * MIN_FREE_PERCENT && !!A.res.requestSource(roomName, RESOURCE_ENERGY, null, null, false, id => Game.getObjectById(id).structureType === STRUCTURE_CONTAINER).id
+    }, [ pid ])
+}
+
 export function issueCentralTransfer(roomName: string, getLinkBuffer: () => Id<StructureLink>[], linkBufferSignal: string) {
     const planInfo = P.plan(roomName, 'unit', unitName)
     assertWithMsg( planInfo !== null, `运行核心转移模块的房间, 一定需要是可规划完成的` )
     const leftTopPos = planInfo.leftTops[0]
     issueCentralTransferProc(roomName, leftTopPos, getLinkBuffer, linkBufferSignal)
+    issueEnergyStoreProc(roomName, leftTopPos)
 }

@@ -95,7 +95,7 @@ function issueUpgradeProc(roomName: string) {
         /** 已经接近 Controller */
         if ( creep.pos.roomName === roomName && creep.pos.getRangeTo(controller) <= 3 ) return A.proc.OK
 
-        creep.moveTo(controller)
+        creep.travelTo(controller, { range: 3 })
         return A.proc.OK_STOP_CURRENT
     }
 
@@ -244,7 +244,7 @@ function issueBuildProc(roomName: string) {
                 constructionSite = null
                 return [ A.proc.OK_STOP_CUSTOM, 'getConstructionSite' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
             }
-        } else creep.moveTo(constructionSite.pos)
+        } else creep.travelTo(constructionSite.pos, { range: 3 })
 
         return A.proc.OK_STOP_CURRENT
     }
@@ -488,7 +488,8 @@ export function registerForRoom() {
     C.design('worker', {
         body: {
             1: [ CARRY, WORK, MOVE ], 
-            3: [ CARRY, CARRY, WORK, WORK, MOVE, MOVE ]
+            3: [ CARRY, CARRY, WORK, WORK, MOVE, MOVE ], 
+            5: [ CARRY, CARRY, CARRY, CARRY, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE ]
         }, 
         amount: 5, 
     });

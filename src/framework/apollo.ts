@@ -1069,8 +1069,9 @@ class ResourceModule {
      * @param requestPos 请求资源的发起方位置 - 用于选择来源
      * @param autoWait 是否自动阻塞在房间资源信号量上
      */
-    requestSource(roomName: string, resourceType: ResourceConstant, amount?: number, requestPos?: RoomPosition, autoWait: boolean = true ): { code: StuckableAtomicFuncReturnCode, id: Id<StorableStructure> | null} {
-        const candidates = this.#getResourceSourcesInRoom(roomName, resourceType).ids
+    requestSource(roomName: string, resourceType: ResourceConstant, amount?: number, requestPos?: RoomPosition, autoWait: boolean = true, filter: (id: Id<StorableStructure>) => boolean = null ): { code: StuckableAtomicFuncReturnCode, id: Id<StorableStructure> | null} {
+        let candidates = this.#getResourceSourcesInRoom(roomName, resourceType).ids
+        if ( !!filter ) candidates = _.filter(candidates, filter)
         if ( candidates.length === 0 ) return {
             code: autoWait ? Apollo.proc.signal.Swait({ signalId: this.#getResourceSourcesInRoom(roomName, resourceType).existSignalId, lowerbound: 1, request: 0 }) : Apollo.proc.OK, 
             id: null, 
