@@ -7,6 +7,7 @@ import { mountAllPrototypes } from './prototypes'
 import { issueClaimRoomWatcher, registerClaimRoom } from './modules/roomClaim'
 import { issueForRoom, registerForRoom } from './room'
 import { registerDefendRoom } from './modules/roomDefense'
+import { registerFastUpgrade } from './modules/fastUpgrade'
 
 /** AI 挂载入口 */
 export function mountAll() {
@@ -28,6 +29,8 @@ export function registerAll() {
     registerQuickEnergyFill()
     /** Central Transfer 模块 */
     registerCentralTransfer()
+    /** Fast Upgrade 模块 */
+    registerFastUpgrade()
     /** Claim Room 模块 */
     registerClaimRoom()
     issueClaimRoomWatcher()

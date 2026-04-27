@@ -9,6 +9,7 @@ import { registerCustomConstructions } from './config.construction'
 import { issueHarvestSource } from './modules/harvestSource'
 import { issueCentralTransfer } from './modules/centralTransfer'
 import { issueDefendProc } from './modules/roomDefense'
+import { issueFastUpgrade } from './modules/fastUpgrade'
 
 function getEnergy(roomName: string, getWorkerName: () => string, setWorkerName: ( name: string ) => void) {
     let targetId: Id<Source> | Id<StorableStructure> = null
@@ -71,67 +72,6 @@ function getEnergy(roomName: string, getWorkerName: () => string, setWorkerName:
 
         return A.proc.OK_STOP_CURRENT
     }
-}
-
-function issueUpgradeProc(roomName: string) {
-    let workerName = null
-
-    function gotoController(name: string) {
-        const creep = Game.creeps[name]
-        /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
-            C.cancel(name)
-            workerName = null
-            return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
-        }
-
-        /** 最后几秒, 撤离 */
-        if ( creep.ticksToLive < 3 ) {
-            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
-                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
-            return A.proc.OK_STOP_CURRENT
-        }
-
-        const controller = Game.rooms[roomName].controller
-        /** 已经接近 Controller */
-        if ( creep.pos.roomName === roomName && creep.pos.getRangeTo(controller) <= 3 ) return A.proc.OK
-
-        creep.travelTo(controller, { range: 3 })
-        return A.proc.OK_STOP_CURRENT
-    }
-
-    function upgradeController(name: string) {
-        const creep = Game.creeps[name]
-        /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
-            C.cancel(name)
-            workerName = null
-            return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
-        }
-
-        /** 最后几秒, 撤离 */
-        if ( creep.ticksToLive < 3 ) {
-            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
-                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
-            return A.proc.OK_STOP_CURRENT
-        }
-
-        const controller = Game.rooms[roomName].controller
-        if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) return A.proc.OK_STOP_NEXT
-
-        creep.upgradeController(controller)
-        return A.proc.OK_STOP_CURRENT
-    }
-
-    const gotoSource = getEnergy(roomName, () => workerName, name => workerName = name)
-
-    return A.proc.createProc([
-        () => C.acquire('worker', roomName, name => workerName = name), 
-        [ 'gotoSource', gotoSource ], 
-        () => gotoController(workerName), 
-        () => upgradeController(workerName), 
-        [ 'JUMP', () => true, 'gotoSource' ]
-    ], `${roomName} => Upgrade`)
 }
 
 function issueFillProc(roomName: string) {
@@ -470,7 +410,6 @@ export function issueForRoom(roomName: string) {
     /** 资源状态输出 */
     // A.timer.add(Game.time + 1, roomName => A.res.print(roomName), [roomName], `输出房间 ${roomName} 资源状态`, 1)
 
-    issueUpgradeProc(roomName)
     issueFillProc(roomName)
     issueBuildProc(roomName)
     issueRepairProc(roomName)
@@ -485,6 +424,8 @@ export function issueForRoom(roomName: string) {
     issueQuickEnergyFill(roomName, () => targetLinkLists, hasTargetLinkSignal)
     /** Central Transfer 模块 */
     issueCentralTransfer(roomName, () => targetLinkLists, hasTargetLinkSignal)
+    /** Fast Upgrade 模块 */
+    issueFastUpgrade(roomName, () => targetLinkLists, hasTargetLinkSignal)
 
     /** 监测 TombStone */
     // ...

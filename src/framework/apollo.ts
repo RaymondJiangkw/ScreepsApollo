@@ -483,9 +483,10 @@ class ProcessModule {
                         returnCode = atomicFunc()
                     } catch (e) {
                         if ( e instanceof Error ) {
-                            const errorMessage = Game.rooms.sim
-                                ? `沙盒模式无法使用 source-map - 显示原始追踪栈<br>${_.escape(e.stack)}`
-                                : `${_.escape(sourceMappedStackTrace(e))}`;
+                            const errorMessage = e.stack
+                            // Game.rooms.sim
+                            //     ? `沙盒模式无法使用 source-map - 显示原始追踪栈<br>${_.escape(e.stack)}`
+                            //     : `${_.escape(sourceMappedStackTrace(e))}`;
                             /** 输出 错误 */
                             log(LOG_ERR, errorMessage)
                             /** 存储 错误 到 Memory 中以备检查 */

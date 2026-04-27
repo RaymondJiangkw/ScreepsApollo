@@ -56,9 +56,8 @@ export function registerHarvestSource() {
         amount: 2, 
         body: {
             1: [ CARRY, WORK, MOVE ], 
-            2: [ CARRY, WORK, WORK, MOVE ], 
-            3: [ CARRY, WORK, WORK, WORK, MOVE ], 
-            4: [ CARRY, WORK, WORK, WORK, WORK, WORK, MOVE ]
+            2: [ CARRY, WORK, WORK, WORK, MOVE ], 
+            3: [ CARRY, WORK, WORK, WORK, WORK, WORK, MOVE ]
         }
     })
 }

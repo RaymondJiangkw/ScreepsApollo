@@ -210,7 +210,11 @@ function issueRoomAttackHealDefend(roomName: string, safePos: RoomPosition) {
     ], `${roomName} => Defense's Attacker`, true)
 
     A.proc.trigger('watch', () => {
-        return Game.rooms[roomName] && Game.rooms[roomName].energyAvailable >= 600 && isDefenseNecessary(roomName)
+        const condition = isDefenseNecessary(roomName)
+        if ( condition && Game.rooms[roomName] && Game.rooms[roomName].energyCapacityAvailable < 600 && !Game.rooms[roomName].controller.safeMode ) {
+            Game.rooms[roomName].controller.activateSafeMode()
+        }
+        return Game.rooms[roomName] && Game.rooms[roomName].energyAvailable >= 600 && condition
     }, [ healerProcId, attackerProcId ])
 }
 

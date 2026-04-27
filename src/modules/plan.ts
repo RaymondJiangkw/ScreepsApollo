@@ -277,10 +277,11 @@ class PlanModule {
                 if ( arg2.roomName === arg3.roomName )
                     // 同房间内连接
                     this.#planOrder.push({ token: 'road', name: arg1, specializedToRoom: arg3.roomName, startFromLevel: opts.startFromLevel })
-                else
+                else {
                     // 跨房间连接
                     cross = true
                     assertWithMsg( !opts.startFromLevel, `跨房间时, 暂不支持设定达到一定 Controller 等级` )
+                }
             }
             this.#roadDict[ arg1 ] = { unitNameUorPosU: arg2, unitNameVorPosV: arg3, cross, opts }
         }
