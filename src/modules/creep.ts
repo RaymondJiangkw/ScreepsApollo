@@ -89,8 +89,8 @@ class CreepModule {
             // Controller 等级对应的体型和数量. 而是输入的 Controller
             // 等级对应于体型, 数量发生变化.
             this.#types[type][level] = {
-                body: descriptor.body[largest_less_than(Object.keys(descriptor.body), level)], 
-                amount: descriptor.amount[largest_less_than(Object.keys(descriptor.amount), level)], 
+                body: largest_less_than(Object.keys(descriptor.body), level) === null ? [ MOVE ] : descriptor.body[largest_less_than(Object.keys(descriptor.body), level)], 
+                amount: largest_less_than(Object.keys(descriptor.amount), level) === null ? 0 : descriptor.amount[largest_less_than(Object.keys(descriptor.amount), level)], 
                 priority: descriptor.priority, strict: descriptor.strict
             }
     }

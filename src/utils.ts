@@ -1,6 +1,6 @@
 export function getFileNameAndLineNumber() {
     const e = new Error();
-    const regex = /\((.*):(\d+):(\d+)\)$/
+    const regex = /(?:\()?(.+):(\d+):(\d+)(?:\))?$/
     const match = regex.exec(e.stack.split("\n")[2]);
     return `${match[1]}:${match[2]}:${match[3]}`;
 }
@@ -44,7 +44,8 @@ export function log(level: LOG_LEVEL, ...args): void {
 export function stackError(message: string): void {
     if ( !('_err' in Memory) ) (Memory as any)._err = [];
     // if ( (Memory as any)._err.indexOf(message) === -1 )
-    if ( (Memory as any)._err.length === 0 ) (Memory as any)._err.push(message)
+    if ( (Memory as any)._err.length === 0 )
+        (Memory as any)._err.push(message)
 }
 
 export function stackLog(message: string): void {

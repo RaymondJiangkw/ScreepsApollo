@@ -2,7 +2,7 @@
  * 🛠️ 自动规划模块
  */
 
-import { assertWithMsg, constructArray, convertPosToString, getAvailableSurroundingPos, log, LOG_DEBUG, LOG_ERR, LOG_INFO, LOG_PROFILE } from "@/utils"
+import { assertWithMsg, constructArray, convertPosToString, getAvailableSurroundingPos, getFileNameAndLineNumber, log, LOG_DEBUG, LOG_ERR, LOG_INFO, LOG_PROFILE } from "@/utils"
 import { Apollo as A } from "@/framework/apollo"
 import { deleteStructureMemory, getStructureMemory } from "./structureMemory"
 
@@ -943,7 +943,7 @@ class PlanModule {
     #updateUnitTagSignal(signalId: string, roomName: string, unitName: string, tagName: string) {
         /** 重置 */
         if ( A.proc.signal.getValue(signalId) > 0 ) {
-            assertWithMsg( A.proc.signal.Swait( { signalId, lowerbound: A.proc.signal.getValue(signalId), request: A.proc.signal.getValue(signalId) } ) === A.proc.OK )
+            assertWithMsg( A.proc.signal.Swait( { signalId, lowerbound: A.proc.signal.getValue(signalId), request: A.proc.signal.getValue(signalId) } ) === A.proc.OK, getFileNameAndLineNumber() )
         }
         const { unit } = this.#unitDict[unitName]
         const leftTops = this.plan(roomName, 'unit', unitName).leftTops
@@ -957,7 +957,7 @@ class PlanModule {
                 }
             }
         }
-        assertWithMsg( A.proc.signal.Ssignal({ signalId, request: cnt }) === A.proc.OK )
+        assertWithMsg( A.proc.signal.Ssignal({ signalId, request: cnt }) === A.proc.OK, getFileNameAndLineNumber() )
     }
     #getRoom2UnitTagSignal(roomName: string, unitName: string, tagName: string): string {
         assertWithMsg( this.plan(roomName, 'unit', unitName) !== null, `${roomName} 的建筑单元 ${unitName} 规划在获取是否完成信号量时, 需要一定规划成功` )

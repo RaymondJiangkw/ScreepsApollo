@@ -53,12 +53,12 @@ export function issueClaimRoomProc(srcRoomName: string, tarRoomName: string, get
         }
 
         if ( creep.pos.roomName !== tarRoomName ) {
-            creep.moveTo(new RoomPosition(25, 25, tarRoomName))
+            creep.travelTo(new RoomPosition(25, 25, tarRoomName), { maxOps: 20000 })
             return A.proc.OK_STOP_CURRENT
         }
 
         /** 防止出现特殊情况, 即同一 tick, claim 成功, 唤醒 worker 进程, worker 恰好在房间内, 此时 controller.my 还没更新, 会出现 claim 成功与 controller.my 冲突, 导致进程非正常结束. 所以, 一定从下一 tick 开始 */
-        creep.moveTo(new RoomPosition(25, 25, tarRoomName))
+        creep.travelTo(new RoomPosition(25, 25, tarRoomName), { maxOps: 20000 })
         return A.proc.OK_STOP_NEXT
     }
 

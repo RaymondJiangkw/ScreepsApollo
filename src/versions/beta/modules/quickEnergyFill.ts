@@ -6,7 +6,7 @@ import { Apollo as A } from "@/framework/apollo"
 import { creepModule as C } from "@/modules/creep"
 import { planModule as P } from "@/modules/plan"
 import { transferModule as T } from "@/modules/transfer"
-import { assertWithMsg, convertPosToString, log, LOG_DEBUG } from "@/utils"
+import { assertWithMsg, convertPosToString, getFileNameAndLineNumber, log, LOG_DEBUG } from "@/utils"
 
 const unitName = 'centralSpawn'
 const tagLeftContainer = 'leftContainer'
@@ -46,7 +46,7 @@ export function isBelongingToQuickEnergyFilling(pos: RoomPosition) {
     } else return false
 }
 
-function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuffer: () => Id<StructureLink>[], linkBufferSignal: string) {
+function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos) {
     const posLeftContainer: Pos     = { x: leftTopPos.x + 1, y: leftTopPos.y + 3, roomName: leftTopPos.roomName }
     const posRightContainer: Pos    = { x: leftTopPos.x + 5, y: leftTopPos.y + 3, roomName: leftTopPos.roomName }
     const posLink: Pos              = { x: leftTopPos.x + 3, y: leftTopPos.y + 3, roomName: leftTopPos.roomName }
@@ -65,10 +65,6 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
     function checkLinkId( pos: Pos ) {
         if ( idLink !== null && Game.getObjectById( idLink ) ) return A.proc.STOP_SLEEP
         else if ( idLink !== null ) {
-            const prevLength = getLinkBuffer().length
-            _.remove( getLinkBuffer(), e => e === idLink )
-            if ( prevLength > 0 && getLinkBuffer().length === 0 )
-                assertWithMsg( A.proc.signal.Swait({ signalId: linkBufferSignal, lowerbound: 1, request: 1 }) === A.proc.OK, `quickEnergyFill -> 70` )
             idLink = null
             return [A.proc.STOP_ERR, `${roomName} 的快速填充的 Link 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
         } else {
@@ -76,11 +72,6 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
             const link: StructureLink = Game.rooms[pos.roomName].lookForAt(LOOK_STRUCTURES, pos.x, pos.y).filter(s => s.structureType === STRUCTURE_LINK)[0] as StructureLink
             if ( !link ) return [A.proc.STOP_ERR, `${roomName} 的快速填充的 Link 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
             idLink = link.id as Id<StructureLink>
-
-            const prevLength = getLinkBuffer().length
-            getLinkBuffer().push( idLink )
-            if ( prevLength === 0 )
-                A.proc.signal.Ssignal({ signalId: linkBufferSignal, request: 1 })
             return A.proc.STOP_SLEEP
         }
     }
@@ -92,10 +83,6 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
 
     A.proc.trigger('watch', () => {
         if ( idLink !== null && !Game.getObjectById( idLink ) ) {
-            const prevLength = getLinkBuffer().length
-            _.remove( getLinkBuffer(), e => e === idLink )
-            if ( prevLength > 0 && getLinkBuffer().length === 0 )
-                assertWithMsg( A.proc.signal.Swait({ signalId: linkBufferSignal, lowerbound: 1, request: 1 }) === A.proc.OK, `quickEnergyFill -> 97` )
             idLink = null
             return true
         }
@@ -148,13 +135,13 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
         /** 尝试获得能量来源 */
         let amount = 0
         let requestedSource = null
-        if ( idLink !== null && Game.getObjectById( idLink ) ) {
+        if ( idLink !== null && Game.getObjectById( idLink ) && A.res.query(idLink, RESOURCE_ENERGY) > 0 ) {
             /** === 有 Link 时 === */
             amount = A.res.query(idLink, RESOURCE_ENERGY)
             if ( amount === 0 )
                 return A.res.request({ id: idLink, resourceType: RESOURCE_ENERGY, amount: {lowerbound: Math.min(CARRY_CAPACITY, containerEnergyGap[0]), request: 0} })
         } else {
-            /** === 无 Link 时 === */
+            /** === 无 Link / Link No Energy 时 === */
             requestedSource = A.res.requestSource( roomName, RESOURCE_ENERGY, CARRY_CAPACITY, Game.getObjectById(containerId).pos, true )
             if ( requestedSource.code !== A.proc.OK )
                 return requestedSource.code
@@ -181,7 +168,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
         }
         assertWithMsg( energyGap > 0, `quickEnergyFill -> 181` )
         assertWithMsg( A.res.request({ id: containerId, resourceType: A.res.CAPACITY, amount: energyGap }, `issueQuickEnergyFillProc -> 182`) === A.proc.OK, `quickEnergyFill -> 182` )
-        if ( idLink !== null && Game.getObjectById( idLink ) ) {
+        if ( idLink !== null && Game.getObjectById( idLink ) && A.res.query(idLink, RESOURCE_ENERGY) > 0 ) {
             assertWithMsg( A.res.request({ id: idLink, resourceType: RESOURCE_ENERGY, amount: energyGap }, `issueQuickEnergyFillProc -> 184`) === A.proc.OK, `quickEnergyFill -> 184` )
             if ( A.proc.signal.getValue( TopSignal ) < A.proc.signal.getValue( BottomSignal ) ) {
                 TopPool.push( { fromId: idLink, toId: containerId, remainingAmount: energyGap, currentAmount: 0 } )
@@ -244,7 +231,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
             .sort((u, v) => ((u as StorableStructure).store.getFreeCapacity(RESOURCE_ENERGY) - (issuedTransferFor[convertPosToString(u.pos)] || 0)) - ((v as StorableStructure).store.getFreeCapacity(RESOURCE_ENERGY) - (issuedTransferFor[convertPosToString(v.pos)] || 0))) as (StructureSpawn | StructureExtension)[]
         log(LOG_DEBUG, `${roomName} => 需要快速填充的建筑: ${structures}; Top Pool [${A.proc.signal.getValue(TopSignal)}]: ${JSON.stringify(TopPool)}; Bottom Pool [${A.proc.signal.getValue(BottomSignal)}]: ${JSON.stringify(BottomPool)}`)
         /** 强制唤醒 Creep 填充进程 */
-        assertWithMsg( A.proc.signal.Ssignal( { signalId: TopSignal, request: 0 }, { signalId: BottomSignal, request: 0 } ) === A.proc.OK )
+        assertWithMsg( A.proc.signal.Ssignal( { signalId: TopSignal, request: 0 }, { signalId: BottomSignal, request: 0 } ) === A.proc.OK, getFileNameAndLineNumber() )
         /** 暂无 Structure 需要填充能量 */
         if ( structures.length === 0 ) return A.proc.STOP_SLEEP
         for ( const structure of structures ) {
@@ -479,9 +466,9 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos, getLinkBuff
     ], `${roomName} => Quick Filler (Right Bottom)`)
 }
 
-export function issueQuickEnergyFill(roomName: string, getLinkBuffer: () => Id<StructureLink>[], linkBufferSignal: string) {
+export function issueQuickEnergyFill(roomName: string) {
     const planInfo = P.plan(roomName, 'unit', unitName)
     assertWithMsg( planInfo !== null, `运行快速能量填充模块的房间, 一定需要是可规划完成的` )
     const leftTopPos = planInfo.leftTops[0]
-    issueQuickEnergyFillProc(roomName, leftTopPos, getLinkBuffer, linkBufferSignal)
+    issueQuickEnergyFillProc(roomName, leftTopPos)
 }

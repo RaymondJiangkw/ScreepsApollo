@@ -82,10 +82,9 @@ export const errorMapper = function (next) {
         catch (e) {
             if (e instanceof Error) {
                 // 渲染报错调用栈，沙盒模式用不了这个
-                const errorMessage = e.stack
-                // Game.rooms.sim ?
-                //     `沙盒模式无法使用 source-map - 显示原始追踪栈<br>${_.escape(e.stack)}` :
-                //     `${_.escape(sourceMappedStackTrace(e))}`
+                const errorMessage = Game.rooms.sim ?
+                     `沙盒模式无法使用 source-map - 显示原始追踪栈<br>${_.escape(e.stack)}` :
+                     `${_.escape(sourceMappedStackTrace(e))}`
                 
                 console.log(`<text style="color:#ef9a9a">${errorMessage}</text>`)
             }

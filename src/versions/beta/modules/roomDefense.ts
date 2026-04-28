@@ -12,12 +12,13 @@ import { Apollo as A } from "@/framework/apollo"
 import { planModule as P } from "@/modules/plan"
 import { creepModule as C } from "@/modules/creep"
 import { transferModule as T } from '@/modules/transfer'
-import { assertWithMsg, calcBodyEffectiveness, findDistanceTo } from "@/utils"
+import { assertWithMsg, calcBodyEffectiveness, findDistanceTo, getFileNameAndLineNumber } from "@/utils"
 
 export function registerDefendRoom() {
     C.design('defense_healer', {
         amount: 1, 
         body: {
+            1: [ MOVE, HEAL ], 
             3: [ MOVE, MOVE, HEAL, HEAL ]
         }, 
         priority: C.PRIORITY_IMPORTANT
@@ -25,6 +26,7 @@ export function registerDefendRoom() {
     C.design('defense_attacker', {
         amount: 1, 
         body: {
+            1: [ MOVE, MOVE, ATTACK, ATTACK ], 
             3: [ MOVE, MOVE, MOVE, MOVE, MOVE, ATTACK, ATTACK, ATTACK, ATTACK, ATTACK ]
         }, 
         priority: C.PRIORITY_IMPORTANT
@@ -67,7 +69,7 @@ function issueRoomTowerDefend(roomName: string) {
                 towers.forEach(tower => {
                     if ( A.res.query(tower.id, RESOURCE_ENERGY) >= TOWER_ENERGY_COST  ) {
                         if ( !!targetCreep ) {
-                            assertWithMsg( A.res.request({ id: tower.id, resourceType: RESOURCE_ENERGY, amount: TOWER_ENERGY_COST }, 'issueTowerProc -> 396') === A.proc.OK )
+                            assertWithMsg( A.res.request({ id: tower.id, resourceType: RESOURCE_ENERGY, amount: TOWER_ENERGY_COST }, 'issueTowerProc -> 396') === A.proc.OK, getFileNameAndLineNumber() )
                             A.timer.add(Game.time + 1, id => A.res.signal(id, A.res.CAPACITY_ENERGY, TOWER_ENERGY_COST), [ tower.id ], `更新塔 ${tower.id} 的容量`)
                             tower.attack(targetCreep)
                         }
@@ -84,7 +86,7 @@ function issueRoomTowerDefend(roomName: string) {
                         if ( amount > 0 ) {
                             assertWithMsg( A.res.request({ id: tower.id, resourceType: A.res.CAPACITY_ENERGY, amount }) === A.proc.OK, `issueTowerProc -> 415` )
                             assertWithMsg( A.res.request({ id: sourceId, resourceType: RESOURCE_ENERGY, amount }) === A.proc.OK, `issueTowerProc -> 416` )
-                            T.transfer( sourceId, tower.id, RESOURCE_ENERGY, amount )
+                            T.transfer( sourceId, tower.id, RESOURCE_ENERGY, amount, { priority: T.PRIORITY_IMPORTANT } )
                         }
                     }
                 }
@@ -111,13 +113,13 @@ function issueRoomAttackHealDefend(roomName: string, safePos: RoomPosition) {
             healerName = name
             A.proc.signal.Ssignal({ signalId: healerSpawned, request: 1 })
         }), 
-        () => A.proc.signal.Swait({ signalId: healerSpawned, lowerbound: 1, request: 0 }, { signalId: attackerSpawned, lowerbound: 1, request: 0 }), 
+        () => A.proc.signal.Swait({ signalId: attackerSpawned, lowerbound: 1, request: 0 }), 
         () => {
             const healer = Game.creeps[healerName]
             if ( !healer ) {
                 C.cancel(healerName)
                 healerName = null
-                assertWithMsg( A.proc.signal.Swait({ signalId: healerSpawned, lowerbound: 1, request: 1 }) === A.proc.OK )
+                assertWithMsg( A.proc.signal.Swait({ signalId: healerSpawned, lowerbound: 1, request: 1 }) === A.proc.OK, getFileNameAndLineNumber() )
 
                 if ( isDefenseNecessary(roomName) ) return [A.proc.STOP_ERR, `Creep 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
                 else return A.proc.STOP_SLEEP
@@ -157,13 +159,13 @@ function issueRoomAttackHealDefend(roomName: string, safePos: RoomPosition) {
             attackerName = name
             A.proc.signal.Ssignal({ signalId: attackerSpawned, request: 1 })
         }), 
-        () => A.proc.signal.Swait({ signalId: healerSpawned, lowerbound: 1, request: 0 }, { signalId: attackerSpawned, lowerbound: 1, request: 0 }), 
+        () => A.proc.signal.Swait({ signalId: healerSpawned, lowerbound: 1, request: 0 }), 
         () => {
             const attacker = Game.creeps[attackerName]
             if ( !attacker ) {
                 C.cancel(attackerName)
                 attackerName = null
-                assertWithMsg( A.proc.signal.Swait({ signalId: attackerSpawned, lowerbound: 1, request: 1 }) === A.proc.OK )
+                assertWithMsg( A.proc.signal.Swait({ signalId: attackerSpawned, lowerbound: 1, request: 1 }) === A.proc.OK, getFileNameAndLineNumber() )
 
                 if ( isDefenseNecessary(roomName) ) return [A.proc.STOP_ERR, `Creep 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
                 else return A.proc.STOP_SLEEP

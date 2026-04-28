@@ -6,7 +6,7 @@ import { Apollo as A } from "@/framework/apollo"
 import { planModule as P } from "@/modules/plan"
 import { creepModule as C } from "@/modules/creep"
 import { transferModule as T } from "@/modules/transfer"
-import { assertWithMsg, calcBodyEffectiveness, getAvailableSurroundingPos, log, LOG_ERR } from "@/utils"
+import { assertWithMsg, calcBodyEffectiveness, getAvailableSurroundingPos, getFileNameAndLineNumber, log, LOG_ERR } from "@/utils"
 
 /** 管理 Controller 附近的建筑 */
 type ControllerRelevantStructures = {
@@ -102,8 +102,8 @@ function getEnergy(roomName: string, getWorkerName: () => string, setWorkerName:
         } else {
             const amount = Math.min(A.res.query(targetId as Id<StorableStructure>, RESOURCE_ENERGY), creep.store.getFreeCapacity(RESOURCE_ENERGY))
             if ( amount > 0 ) {
-                assertWithMsg( A.res.request({ id: targetId as Id<StorableStructure>, resourceType: RESOURCE_ENERGY, amount }, 'getEnergy -> 70') === OK )
-                assertWithMsg( creep.withdraw(target, RESOURCE_ENERGY, amount) === OK )
+                assertWithMsg( A.res.request({ id: targetId as Id<StorableStructure>, resourceType: RESOURCE_ENERGY, amount }, 'getEnergy -> 70') === OK, getFileNameAndLineNumber() )
+                assertWithMsg( creep.withdraw(target, RESOURCE_ENERGY, amount) === OK, getFileNameAndLineNumber() )
                 A.timer.add(Game.time + 1, (targetId, amount) => A.res.signal(targetId, A.res.CAPACITY, amount), [targetId, amount], `${targetId} 资源更新`)
             } else targetId = null
         }
@@ -177,7 +177,7 @@ export function registerFastUpgrade() {
     C.design('weak_upgrader', {
         body: {
             1: [ CARRY, WORK, MOVE ], 
-            3: [ CARRY, CARRY, WORK, WORK, MOVE, MOVE ], 
+            2: [ CARRY, CARRY, WORK, WORK, MOVE, MOVE ], 
             5: [ CARRY, CARRY, CARRY, CARRY, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE ], 
             8: [ CARRY, WORK, MOVE ]
         }, 
@@ -227,7 +227,7 @@ function issueFastUpgradesBuildProc(roomName: string, controllerId: Id<Structure
                 const structure = Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, pos).filter(s => s.structureType === structureType)[0]
                 if ( structure ) {
                     info()[structureType].id = structure.id
-                    assertWithMsg( A.proc.signal.Ssignal({ signalId: buildCompleteSignal, request: 1 }) === A.proc.OK )
+                    assertWithMsg( A.proc.signal.Ssignal({ signalId: buildCompleteSignal, request: 1 }) === A.proc.OK, getFileNameAndLineNumber() )
                     return A.proc.STOP_SLEEP
                 } else {
                     const retCode = Game.rooms[roomName].createConstructionSite(pos, structureType)
@@ -294,8 +294,8 @@ function issueFastUpgradeProc(roomName: string, controllerId: Id<StructureContro
             return A.res.request({ id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: { lowerbound: CARRY_CAPACITY, request: 0 } })
         
         const transferAmount = Math.min(amount, capacity)
-        assertWithMsg( A.res.request({ id: container.id, resourceType: A.res.CAPACITY, amount: transferAmount }) === A.proc.OK )
-        assertWithMsg( A.res.request({ id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: transferAmount }) === A.proc.OK )
+        assertWithMsg( A.res.request({ id: container.id, resourceType: A.res.CAPACITY, amount: transferAmount }) === A.proc.OK, getFileNameAndLineNumber() )
+        assertWithMsg( A.res.request({ id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: transferAmount }) === A.proc.OK, getFileNameAndLineNumber() )
         T.transfer(requestedSource.id, container.id, RESOURCE_ENERGY, transferAmount)
         return A.proc.OK_STOP_CURRENT
     }
@@ -371,9 +371,9 @@ function issueFastUpgradeProc(roomName: string, controllerId: Id<StructureContro
                             const amount = A.res.query(container.id, RESOURCE_ENERGY)
                             if ( amount <= 0 ) return A.res.request({ id: container.id, resourceType: RESOURCE_ENERGY, amount: { lowerbound: CARRY_CAPACITY, request: 0 } })
                             const withdrawAmount = Math.min(amount, creep.store.getFreeCapacity())
-                            assertWithMsg( A.res.request({ id: container.id, resourceType: RESOURCE_ENERGY, amount: withdrawAmount }) === A.proc.OK )
+                            assertWithMsg( A.res.request({ id: container.id, resourceType: RESOURCE_ENERGY, amount: withdrawAmount }) === A.proc.OK, getFileNameAndLineNumber() )
                             A.timer.add(Game.time + 1, (id, a) => A.res.signal(id, A.res.CAPACITY, a), [container.id, withdrawAmount], `${container.id} 资源更新`)
-                            assertWithMsg( creep.withdraw(container, RESOURCE_ENERGY, withdrawAmount) === OK )
+                            assertWithMsg( creep.withdraw(container, RESOURCE_ENERGY, withdrawAmount) === OK, getFileNameAndLineNumber() )
                         }
                         return A.proc.OK_STOP_CURRENT
                     }
@@ -394,7 +394,7 @@ function issueFastUpgradeProc(roomName: string, controllerId: Id<StructureContro
     }, [ containerPid, ...upgraderPids ])
 }
 
-export function issueFastUpgrade( roomName: string, getDestinationLinks: () => Id<StructureLink>[], destinationLinksReadySignalId: string ) {
+export function issueFastUpgrade( roomName: string ) {
     const room = Game.rooms[roomName]
     assertWithMsg( room && room.controller && room.controller.my, `无法为非自己控制的房间创建 Upgrade 方法` )
     const sources = Game.rooms[roomName].find(FIND_SOURCES) // 根据 Source 数量决定最快升级数量

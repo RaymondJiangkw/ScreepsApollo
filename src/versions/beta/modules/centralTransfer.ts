@@ -6,7 +6,7 @@ import { Apollo as A } from "@/framework/apollo"
 import { creepModule as C } from "@/modules/creep"
 import { planModule as P } from "@/modules/plan"
 import { transferModule as T } from "@/modules/transfer"
-import { assertWithMsg, convertPosToString, insertSortedBy, log, LOG_DEBUG } from "@/utils"
+import { assertWithMsg, convertPosToString, getFileNameAndLineNumber, insertSortedBy, log, LOG_DEBUG } from "@/utils"
 
 const unitName = 'centralTransfer'
 const tagName = 'transferStructures'
@@ -24,6 +24,19 @@ export function registerCentralTransfer() {
         priority: C.PRIORITY_IMPORTANT, 
         amount: 1
     })
+}
+
+/** 用于判定 Extension 是否属于本模块填充 */
+export function isBelongingToCentralTransferFilling(pos: RoomPosition) {
+    const planInfo = P.plan(pos.roomName, 'unit', unitName)
+    /** 如果无法完成规划, 则一定不属于 */
+    if ( planInfo === null )
+        return false
+    const leftTopPos = planInfo.leftTops[0]
+    if ( !!Game.rooms[pos.roomName].storage ) {
+        // 只有当 Storage 存在时, 才判定是否属于
+        return pos.x >= leftTopPos.x + 1 && pos.y >= leftTopPos.y + 1 && pos.x <= leftTopPos.x + 3 && pos.y <= leftTopPos.y + 3
+    } else return false
 }
 
 function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuffer: () => Id<StructureLink>[], linkBufferSignal: string) {
@@ -85,7 +98,7 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
                 const prevLength = getLinkBuffer().length
                 _.remove(getLinkBuffer(), e => e === idLink)
                 if ( prevLength > 0 && getLinkBuffer().length === 0 )
-                    assertWithMsg( A.proc.signal.Swait({ signalId: linkBufferSignal, lowerbound: 1, request: 1 }) === A.proc.OK )
+                    assertWithMsg( A.proc.signal.Swait({ signalId: linkBufferSignal, lowerbound: 1, request: 1 }) === A.proc.OK, getFileNameAndLineNumber() )
             }
             idLink = null
         }
@@ -130,7 +143,7 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
             const prevLength = getLinkBuffer().length
             getLinkBuffer().push( idLink )
             if ( prevLength === 0 )
-                assertWithMsg( A.proc.signal.Ssignal({ signalId: linkBufferSignal, request: 1 }) === A.proc.OK )
+                assertWithMsg( A.proc.signal.Ssignal({ signalId: linkBufferSignal, request: 1 }) === A.proc.OK, getFileNameAndLineNumber() )
         }
         if ( !idFactory && !!structureFactory ) {
             idFactory = structureFactory.id
@@ -213,15 +226,15 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
                 return [A.proc.STOP_ERR, `Creep [${workerName}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
             }
 
-            assertWithMsg( creep.store.getFreeCapacity() > 0 )
-            assertWithMsg( !!currentTransferTask.fromId )
+            assertWithMsg( creep.store.getFreeCapacity() > 0, getFileNameAndLineNumber() )
+            assertWithMsg( !!currentTransferTask.fromId, getFileNameAndLineNumber() )
 
             const source = Game.getObjectById(currentTransferTask.fromId)
             if ( !source ) {
                 const to = Game.getObjectById(currentTransferTask.toId)
                 if ( !!to ) {
                     for ( const { resourceType, amount } of currentTransferTask.content )
-                        assertWithMsg( A.res.signal(currentTransferTask.toId, A.res.describeCapacity(to, resourceType), amount) === A.proc.OK )
+                        assertWithMsg( A.res.signal(currentTransferTask.toId, A.res.describeCapacity(to, resourceType), amount) === A.proc.OK, getFileNameAndLineNumber() )
                     if ( Object.keys(targetDict).length > 0 )
                         return [ A.proc.OK_STOP_CUSTOM, 'moveToTarget' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
                 }
@@ -235,7 +248,7 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
             let capacity = creep.store.getFreeCapacity()
             let amount = Math.min(capacity, currentTransferTask.content[0].amount)
             assertWithMsg( amount >= 0 && amount <= (source.store[resourceType] || 0), `取资源时, ${source} 应至少有 ${amount} ${resourceType} 但只有 ${source.store[resourceType] || 0}.` )
-            assertWithMsg( creep.withdraw(source, resourceType, amount) === OK )
+            assertWithMsg( creep.withdraw(source, resourceType, amount) === OK, getFileNameAndLineNumber() )
             A.timer.add(Game.time + 1, (sourceId, capacityType, amount) => A.res.signal(sourceId, capacityType, amount), [source.id, A.res.describeCapacity(source, resourceType), amount], `取资源后, 更新源建筑的容量`)
 
             currentTransferTask.content[0].amount -= amount
@@ -272,7 +285,7 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
                 const source = Game.getObjectById(currentTransferTask.fromId)
                 if ( !!source ) {
                     for ( const { resourceType, amount } of currentTransferTask.content )
-                        assertWithMsg( A.res.signal(currentTransferTask.fromId, resourceType, amount) === A.proc.OK )
+                        assertWithMsg( A.res.signal(currentTransferTask.fromId, resourceType, amount) === A.proc.OK, getFileNameAndLineNumber() )
                 }
                 targetDict = {}
                 currentTransferTask = null
@@ -282,7 +295,7 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
             const resourceType = Object.keys(targetDict)[0] as ResourceConstant
             const amount = targetDict[resourceType]
             assertWithMsg( amount <= creep.store[resourceType] && amount <= target.store.getFreeCapacity(resourceType), `transfer -> 242 ${amount}}` )
-            assertWithMsg( creep.transfer(target, resourceType, amount) === OK )
+            assertWithMsg( creep.transfer(target, resourceType, amount) === OK, getFileNameAndLineNumber() )
             A.timer.add(Game.time + 1, (targetId, resourceType, amount) => A.res.signal(targetId, resourceType, amount), [target.id, resourceType, amount], `转移资源后, 更新目标建筑相应资源的数量`)
             delete targetDict[resourceType]
 
@@ -314,10 +327,10 @@ function issueEnergyStoreProc(roomName: string, leftTopPos: Pos) {
             if ( amount < TRANSFER_UNIT )
                 return A.res.request({ id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: {lowerbound: TRANSFER_UNIT, request: 0} })
 
-            const capacity = Math.min(A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY), TRANSFER_UNIT)
+            const capacity = Math.min(A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY), amount)
             if ( capacity <= 0 ) return A.proc.STOP_SLEEP
-            assertWithMsg( A.res.request({ id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: capacity }) === A.proc.OK )
-            assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount: capacity }) === A.proc.OK )
+            assertWithMsg( A.res.request({ id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: capacity }) === A.proc.OK, getFileNameAndLineNumber() )
+            assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount: capacity }) === A.proc.OK, getFileNameAndLineNumber() )
             T.transfer(requestedSource.id, Game.rooms[roomName].storage.id, RESOURCE_ENERGY, capacity, { allowLooseGrouping: true })
 
             return A.proc.OK_STOP_CURRENT

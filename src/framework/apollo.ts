@@ -1,4 +1,4 @@
-import { assertWithMsg, generate_random_hex, log, LOG_DEBUG, LOG_ERR, LOG_INFO, LOG_PROFILE, stackError, stackLog } from "@/utils"
+import { assertWithMsg, generate_random_hex, getFileNameAndLineNumber, log, LOG_DEBUG, LOG_ERR, LOG_INFO, LOG_PROFILE, stackError, stackLog } from "@/utils"
 import { sourceMappedStackTrace } from "@/modules/errorMapper"
 
 // -------------------------------------------------------------
@@ -483,10 +483,9 @@ class ProcessModule {
                         returnCode = atomicFunc()
                     } catch (e) {
                         if ( e instanceof Error ) {
-                            const errorMessage = e.stack
-                            // Game.rooms.sim
-                            //     ? `沙盒模式无法使用 source-map - 显示原始追踪栈<br>${_.escape(e.stack)}`
-                            //     : `${_.escape(sourceMappedStackTrace(e))}`;
+                            const errorMessage = Game.rooms.sim
+                                 ? `沙盒模式无法使用 source-map - 显示原始追踪栈<br>${_.escape(e.stack)}`
+                                 : `${_.escape(sourceMappedStackTrace(e))}`;
                             /** 输出 错误 */
                             log(LOG_ERR, errorMessage)
                             /** 存储 错误 到 Memory 中以备检查 */
@@ -949,7 +948,7 @@ class ResourceModule {
     }
     describeCapacity(structure: StorableStructure, resourceType: ResourceConstant | "all") {
         if ( resourceType === "all" ) {
-            assertWithMsg( !(structure instanceof StructureLab || structure instanceof StructurePowerSpawn || structure instanceof StructureNuker) )
+            assertWithMsg( !(structure instanceof StructureLab || structure instanceof StructurePowerSpawn || structure instanceof StructureNuker), getFileNameAndLineNumber() )
             return CAPACITY
         }
 
@@ -1044,7 +1043,7 @@ class ResourceModule {
      * 注册房间内资源的一个来源
      */
     registerSource(roomName: string, resourceType: ResourceConstant | 'all', source: Id<StorableStructure>) {
-        assertWithMsg( !!Game.getObjectById(source) )
+        assertWithMsg( !!Game.getObjectById(source), getFileNameAndLineNumber() )
         if ( resourceType === 'all' ) {
             for ( const resourceType of RESOURCES_ALL ) this.registerSource(roomName, resourceType, source)
         } else {

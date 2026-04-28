@@ -57,7 +57,8 @@ export function registerHarvestSource() {
         body: {
             1: [ CARRY, WORK, MOVE ], 
             2: [ CARRY, WORK, WORK, WORK, MOVE ], 
-            3: [ CARRY, WORK, WORK, WORK, WORK, WORK, MOVE ]
+            3: [ CARRY, WORK, WORK, WORK, WORK, WORK, MOVE ], 
+            4: [ CARRY, WORK, WORK, WORK, WORK, WORK, WORK, WORK, MOVE, MOVE ]
         }
     })
 }
@@ -96,13 +97,15 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
             // 无能量时, 离开工作位置, 同样睡眠
             if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) {
                 // creep.travelTo( source, { flee: true, ignoreCreeps: false, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
-                return A.proc.STOP_SLEEP
+                C.release(name)
+                harvesterName = null
+                return [ A.proc.STOP_SLEEP, (source.ticksToRegeneration || 0) + 1 ] as [ typeof A.proc.STOP_SLEEP, number ]
             } else return A.proc.OK_STOP_NEXT
         }
 
         /** 移动到 Container 的位置 */
         if ( creep.pos.getRangeTo(info()[STRUCTURE_CONTAINER].pos.x, info()[STRUCTURE_CONTAINER].pos.y) > 0 ) {
-            creep.travelTo(new RoomPosition(info()[STRUCTURE_CONTAINER].pos.x, info()[STRUCTURE_CONTAINER].pos.y, roomName))
+            creep.moveTo(new RoomPosition(info()[STRUCTURE_CONTAINER].pos.x, info()[STRUCTURE_CONTAINER].pos.y, roomName))
             return A.proc.OK_STOP_CURRENT
         }
 
@@ -220,12 +223,12 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         }
 
         // 触发能量贮存
-        if ( A.res.query(info()[STRUCTURE_CONTAINER].id, RESOURCE_ENERGY) > CONTAINER_CAPACITY / 2 && Game.rooms[roomName].storage && A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) > CONTAINER_CAPACITY / 4 && A.res.query(Game.rooms[roomName].storage.id, RESOURCE_ENERGY) < getMaintainAmount(RESOURCE_ENERGY) ) {
-            const amount = CONTAINER_CAPACITY / 4
-            assertWithMsg( A.res.request({ id: info()[STRUCTURE_CONTAINER].id, resourceType: RESOURCE_ENERGY, amount }) === A.proc.OK )
-            assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount }) === A.proc.OK )
-            T.transfer( Game.getObjectById(info()[STRUCTURE_CONTAINER].id), Game.rooms[roomName].storage, RESOURCE_ENERGY, amount, { priority: T.PRIORITY_CASUAL } )
-        }
+        // if ( A.res.query(info()[STRUCTURE_CONTAINER].id, RESOURCE_ENERGY) > CONTAINER_CAPACITY / 2 && Game.rooms[roomName].storage && A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) > CONTAINER_CAPACITY / 4 && A.res.query(Game.rooms[roomName].storage.id, RESOURCE_ENERGY) < getMaintainAmount(RESOURCE_ENERGY) ) {
+        //     const amount = CONTAINER_CAPACITY / 4
+        //     assertWithMsg( A.res.request({ id: info()[STRUCTURE_CONTAINER].id, resourceType: RESOURCE_ENERGY, amount }) === A.proc.OK )
+        //     assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount }) === A.proc.OK )
+        //     T.transfer( Game.getObjectById(info()[STRUCTURE_CONTAINER].id), Game.rooms[roomName].storage, RESOURCE_ENERGY, amount, { priority: T.PRIORITY_CASUAL } )
+        // }
 
         // -> Transfer 到 Container 中
         if ( A.res.query(info()[STRUCTURE_CONTAINER].id, A.res.CAPACITY) > 0 ) {

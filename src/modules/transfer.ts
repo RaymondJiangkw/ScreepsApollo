@@ -2,7 +2,7 @@
  * 运输模块
  */
 
-import { assertWithMsg, generate_random_hex, getUsedCapacity, insertSortedBy, log, LOG_DEBUG, raiseNotImplementedError } from "@/utils"
+import { assertWithMsg, generate_random_hex, getFileNameAndLineNumber, getUsedCapacity, insertSortedBy, log, LOG_DEBUG, raiseNotImplementedError } from "@/utils"
 import { Apollo as A } from "@/framework/apollo"
 import { creepModule as C } from "./creep"
 
@@ -165,7 +165,7 @@ class TransferModule {
                                 const to = Game.getObjectById(getCurrentTransferTask().toId)
                                 if ( !!to ) {
                                     // 腾出空间
-                                    assertWithMsg( A.res.signal(to.id, A.res.describeCapacity(to, resourceType as ResourceConstant), targetDict[resourceType]) === A.proc.OK )
+                                    assertWithMsg( A.res.signal(to.id, A.res.describeCapacity(to, resourceType as ResourceConstant), targetDict[resourceType]) === A.proc.OK, getFileNameAndLineNumber() )
                                 }
                             }
                             if ( !getCurrentTransferTask().finishWithdraw ) {
@@ -196,7 +196,7 @@ class TransferModule {
                         // 在最后一秒 withdraw 或 transfer 会返回成功, 但是不会执行
                         if ( creep.ticksToLive === 1 ) return A.proc.OK_STOP_CURRENT
 
-                        assertWithMsg( creep.store.getFreeCapacity() > 0 )
+                        assertWithMsg( creep.store.getFreeCapacity() > 0, getFileNameAndLineNumber() )
                         assertWithMsg( !!getCurrentTransferTask().fromId, `源 Id 未定时, 尚未实现` )
 
                         const source = Game.getObjectById(getCurrentTransferTask().fromId)
@@ -204,7 +204,7 @@ class TransferModule {
                             const to = Game.getObjectById(getCurrentTransferTask().toId)
                             if ( !!to ) {
                                 for ( const { resourceType, amount } of getCurrentTransferTask().content )
-                                    assertWithMsg( A.res.signal(getCurrentTransferTask().toId, A.res.describeCapacity(to, resourceType), amount) === A.proc.OK )
+                                    assertWithMsg( A.res.signal(getCurrentTransferTask().toId, A.res.describeCapacity(to, resourceType), amount) === A.proc.OK, getFileNameAndLineNumber() )
                                 if ( Object.keys(targetDict).length > 0 )
                                     return [ A.proc.OK_STOP_CUSTOM, 'moveToTarget' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
                             }
@@ -213,12 +213,17 @@ class TransferModule {
                             return [ A.proc.OK_STOP_CUSTOM, 'start' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
                         }
 
+                        if ( creep.pos.getRangeTo(source) > 1 ) {
+                            creep.moveTo(source)
+                            return A.proc.OK_STOP_CURRENT
+                        }
+
                         /** 确定运输的种类和数量 & 确定是否运输完成 */
                         let resourceType = getCurrentTransferTask().content[0].resourceType
                         let prevCapacity = creep.store.getFreeCapacity()
                         let amount = Math.min(prevCapacity, getCurrentTransferTask().content[0].amount)
                         assertWithMsg( amount >= 0 && amount <= (source.store[resourceType] || 0), `取资源时, ${source} 应至少有 ${amount} ${resourceType} 但只有 ${source.store[resourceType] || 0}.` )
-                        assertWithMsg( creep.withdraw(source, resourceType, amount) === OK )
+                        assertWithMsg( creep.withdraw(source, resourceType, amount) === OK, getFileNameAndLineNumber() + `(${creep.pos}, ${source.pos}, ${resourceType}, ${amount}, ${prevCapacity}, ${source.store[resourceType]})` )
                         A.timer.add(Game.time + 1, (sourceId, capacityType, amount) => A.res.signal(sourceId, capacityType, amount), [source.id, A.res.describeCapacity(source, resourceType), amount], `取资源后, 更新源建筑的容量`)
 
                         getCurrentTransferTask().content[0].amount -= amount
@@ -248,7 +253,7 @@ class TransferModule {
                                 const to = Game.getObjectById(getCurrentTransferTask().toId)
                                 if ( !!to ) {
                                     // 腾出空间
-                                    assertWithMsg( A.res.signal(to.id, A.res.describeCapacity(to, resourceType as ResourceConstant), targetDict[resourceType]) === A.proc.OK )
+                                    assertWithMsg( A.res.signal(to.id, A.res.describeCapacity(to, resourceType as ResourceConstant), targetDict[resourceType]) === A.proc.OK, getFileNameAndLineNumber() )
                                 }
                             }
                             if ( !getCurrentTransferTask().finishWithdraw ) {
@@ -289,11 +294,16 @@ class TransferModule {
                             const source = Game.getObjectById(getCurrentTransferTask().fromId)
                             if ( !!source ) {
                                 for ( const { resourceType, amount } of getCurrentTransferTask().content )
-                                    assertWithMsg( A.res.signal(getCurrentTransferTask().fromId, resourceType, amount) === A.proc.OK )
+                                    assertWithMsg( A.res.signal(getCurrentTransferTask().fromId, resourceType, amount) === A.proc.OK, getFileNameAndLineNumber() )
                             }
                             targetDict = {}
                             setCurrentTransferTack( null )
                             return [ A.proc.OK_STOP_CUSTOM, 'start' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+                        }
+
+                        if ( creep.pos.getRangeTo(target) > 1 ) {
+                            creep.moveTo(target)
+                            return A.proc.OK_STOP_CURRENT
                         }
 
                         const resourceType = Object.keys(targetDict)[0] as ResourceConstant
@@ -470,9 +480,11 @@ class TransferModule {
             body: {
                 1: [ MOVE, CARRY ], 
                 2: [ MOVE, CARRY, CARRY ], 
-                4: [ MOVE, MOVE, CARRY, CARRY, CARRY, CARRY ], 
-                6: [ MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ], 
-                8: [ MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ], 
+                3: [ MOVE, MOVE, CARRY, CARRY, CARRY, CARRY ], 
+                4: [ MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ], 
+                5: [ MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ], 
+                6: [ MOVE, MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ], 
+                7: [ MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ]
             }, 
             amount: this.#MAXIMUM_TRANSFERRING_NUM
         })

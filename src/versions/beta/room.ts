@@ -3,11 +3,11 @@ import { Apollo as A } from '@/framework/apollo'
 import { creepModule as C } from '@/modules/creep'
 import { planModule as P } from '@/modules/plan'
 import { transferModule as T } from '@/modules/transfer'
-import { assertWithMsg, calcBodyEffectiveness, getAvailableSurroundingPos, log, LOG_DEBUG, LOG_INFO, stackLog } from '@/utils'
+import { assertWithMsg, calcBodyEffectiveness, getAvailableSurroundingPos, getFileNameAndLineNumber, log, LOG_DEBUG, LOG_INFO, stackLog } from '@/utils'
 import { isBelongingToQuickEnergyFilling, issueQuickEnergyFill } from './modules/quickEnergyFill'
 import { registerCustomConstructions } from './config.construction'
 import { issueHarvestSource } from './modules/harvestSource'
-import { issueCentralTransfer } from './modules/centralTransfer'
+import { isBelongingToCentralTransferFilling, issueCentralTransfer } from './modules/centralTransfer'
 import { issueDefendProc } from './modules/roomDefense'
 import { issueFastUpgrade } from './modules/fastUpgrade'
 
@@ -64,8 +64,8 @@ function getEnergy(roomName: string, getWorkerName: () => string, setWorkerName:
         } else {
             const amount = Math.min(A.res.query(targetId as Id<StorableStructure>, RESOURCE_ENERGY), creep.store.getFreeCapacity(RESOURCE_ENERGY))
             if ( amount > 0 ) {
-                assertWithMsg( A.res.request({ id: targetId as Id<StorableStructure>, resourceType: RESOURCE_ENERGY, amount }, 'getEnergy -> 70') === OK )
-                assertWithMsg( creep.withdraw(target, RESOURCE_ENERGY, amount) === OK )
+                assertWithMsg( A.res.request({ id: targetId as Id<StorableStructure>, resourceType: RESOURCE_ENERGY, amount }, 'getEnergy -> 70') === OK, getFileNameAndLineNumber() )
+                assertWithMsg( creep.withdraw(target, RESOURCE_ENERGY, amount) === OK, getFileNameAndLineNumber() )
                 A.timer.add(Game.time + 1, (targetId, amount) => A.res.signal(targetId, A.res.CAPACITY, amount), [targetId, amount], `${targetId} 资源更新`)
             } else targetId = null
         }
@@ -363,7 +363,7 @@ function issuePaintProc(roomName: string) {
 
     const pid = A.proc.createProc([
         ['getRepairedPos', () => getRepairedPos()], 
-        () => C.acquire('worker', roomName, name => workerName = name), 
+        () => C.acquire('painter', roomName, name => workerName = name), 
         [ 'gotoSource', gotoSource ], 
         () => gotoStructure(workerName), 
         [ 'JUMP', () => true, 'getRepairedPos' ]
@@ -387,14 +387,24 @@ export function registerForRoom() {
             5: [ CARRY, CARRY, CARRY, CARRY, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE ]
         }, 
         amount: 5, 
-    });
+    })
+
+    C.design('painter', {
+        body: {
+            1: [ CARRY, WORK, MOVE, MOVE ], 
+            3: [ CARRY, CARRY, WORK, WORK, MOVE, MOVE, MOVE, MOVE ], 
+            4: [ CARRY, CARRY, CARRY, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE ], 
+            5: [ CARRY, CARRY, CARRY, CARRY, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE ]
+        }, 
+        amount: 1, 
+    })
 }
 
 export function issueForRoom(roomName: string) {
     /** @NOTICE 需要房间视野 */
     const room = Game.rooms[roomName]
 
-    assertWithMsg( !!room )
+    assertWithMsg( !!room, getFileNameAndLineNumber() )
 
     /** 建筑规划 */
     registerCustomConstructions(roomName)
@@ -421,11 +431,11 @@ export function issueForRoom(roomName: string) {
     const hasTargetLinkSignal = A.proc.signal.createSignal(0)
     issueHarvestSource(roomName, () => targetLinkLists, hasTargetLinkSignal)
     /** Quick Energy Filling 模块 */
-    issueQuickEnergyFill(roomName, () => targetLinkLists, hasTargetLinkSignal)
+    issueQuickEnergyFill(roomName)
+    /** Fast Upgrade 模块 */
+    issueFastUpgrade(roomName)
     /** Central Transfer 模块 */
     issueCentralTransfer(roomName, () => targetLinkLists, hasTargetLinkSignal)
-    /** Fast Upgrade 模块 */
-    issueFastUpgrade(roomName, () => targetLinkLists, hasTargetLinkSignal)
 
     /** 监测 TombStone */
     // ...
