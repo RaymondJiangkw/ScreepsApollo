@@ -138,8 +138,6 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos) {
         if ( idLink !== null && Game.getObjectById( idLink ) && A.res.query(idLink, RESOURCE_ENERGY) > 0 ) {
             /** === 有 Link 时 === */
             amount = A.res.query(idLink, RESOURCE_ENERGY)
-            if ( amount === 0 )
-                return A.res.request({ id: idLink, resourceType: RESOURCE_ENERGY, amount: {lowerbound: Math.min(CARRY_CAPACITY, containerEnergyGap[0]), request: 0} })
         } else {
             /** === 无 Link / Link No Energy 时 === */
             requestedSource = A.res.requestSource( roomName, RESOURCE_ENERGY, CARRY_CAPACITY, Game.getObjectById(containerId).pos, true )
@@ -359,7 +357,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos) {
         assertWithMsg( amount > 0, `${creep.store.getFreeCapacity()}, ${task.remainingAmount}, ${fromTarget.store[RESOURCE_ENERGY]}` )
         creep.withdraw(fromTarget, RESOURCE_ENERGY, amount)
         if ( fromTarget instanceof StructureContainer || fromTarget instanceof StructureLink )
-            A.timer.add(Game.time + 1, (id, amount) => A.res.signal(id, A.res.CAPACITY, amount), [task.fromId, amount], `${task.fromId} 容量更新`)
+            A.timer.add(Game.time + 1, (id, amount, structureType) => A.res.signal(id, structureType === STRUCTURE_CONTAINER ? A.res.CAPACITY : A.res.CAPACITY_ENERGY, amount), [task.fromId, amount, fromTarget.structureType], `${task.fromId} 容量更新`)
         task.remainingAmount -= amount
         task.currentAmount = amount
         return A.proc.OK_STOP_NEXT
@@ -464,11 +462,13 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos) {
         ['withdraw', () => runCreepWithdraw( () => rightBottomFillerName, name => rightBottomFillerName = name, posRightBottomWorker, RightBottomPool, RightBottomPoolSignal, () => rightBottomFillerCurrentTask, task => rightBottomFillerCurrentTask = task )], 
         () => runCreepTransfer( () => rightBottomFillerName, name => rightBottomFillerName = name, posRightBottomWorker, RightBottomPool, RightBottomPoolSignal, () => rightBottomFillerCurrentTask, task => rightBottomFillerCurrentTask = task )
     ], `${roomName} => Quick Filler (Right Bottom)`)
+
+    return () => idLink
 }
 
-export function issueQuickEnergyFill(roomName: string) {
+export function issueQuickEnergyFill(roomName: string): (() => Id<StructureLink>)[] {
     const planInfo = P.plan(roomName, 'unit', unitName)
     assertWithMsg( planInfo !== null, `运行快速能量填充模块的房间, 一定需要是可规划完成的` )
     const leftTopPos = planInfo.leftTops[0]
-    issueQuickEnergyFillProc(roomName, leftTopPos)
+    return [ issueQuickEnergyFillProc(roomName, leftTopPos) ]
 }

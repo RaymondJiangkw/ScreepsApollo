@@ -18,7 +18,6 @@ export function registerDefendRoom() {
     C.design('defense_healer', {
         amount: 1, 
         body: {
-            1: [ MOVE, HEAL ], 
             3: [ MOVE, MOVE, HEAL, HEAL ]
         }, 
         priority: C.PRIORITY_IMPORTANT
@@ -26,7 +25,6 @@ export function registerDefendRoom() {
     C.design('defense_attacker', {
         amount: 1, 
         body: {
-            1: [ MOVE, MOVE, ATTACK, ATTACK ], 
             3: [ MOVE, MOVE, MOVE, MOVE, MOVE, ATTACK, ATTACK, ATTACK, ATTACK, ATTACK ]
         }, 
         priority: C.PRIORITY_IMPORTANT

@@ -63,7 +63,7 @@ export function registerHarvestSource() {
     })
 }
 
-function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePos: RoomPosition, getDestinationLinks: () => Id<StructureLink>[], destinationLinksReadySignalId: string) {
+function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePos: RoomPosition) {
     const info = () => sourceUnit.getSource2Structure(sourceId)
     let harvesterName = null
 
@@ -119,8 +119,6 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
 
     let buildPos: RoomPosition = null
     let repairPos: RoomPosition = null
-    const linkSignalId = A.proc.signal.createSignal(info()[STRUCTURE_LINK].id ? 1 : 0)
-    const linkHasEnergySignalId = A.proc.signal.createSignal(info()[STRUCTURE_LINK].id && Game.getObjectById(info()[STRUCTURE_LINK].id) && Game.getObjectById(info()[STRUCTURE_LINK].id).store.getUsedCapacity(RESOURCE_ENERGY) > 0 ? 1 : 0)
 
     function buildRepairOrTransfer(name: string) {
         const creep = Game.creeps[name]
@@ -135,18 +133,12 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         const linkPos = new RoomPosition(info()[STRUCTURE_LINK].pos.x, info()[STRUCTURE_LINK].pos.y, roomName)
         if ( info()[STRUCTURE_LINK].id && !Game.getObjectById(info()[STRUCTURE_LINK].id) ) {
             info()[STRUCTURE_LINK].id = null
-            if ( A.proc.signal.getValue(linkSignalId) === 1 )
-                A.proc.signal.Swait({ signalId: linkSignalId, lowerbound: 1, request: 1 })
-            
-            if ( A.proc.signal.getValue(linkHasEnergySignalId) === 1 )
-                A.proc.signal.Swait({ signalId: linkHasEnergySignalId, lowerbound: 1, request: 1 })
         }
         // -> 建造 Link
         if ( !info()[STRUCTURE_LINK].id && Game.rooms[roomName].controller.level >= 6 ) {
             const structure = Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, linkPos).filter(s => s.structureType === STRUCTURE_LINK)[0]
             if ( structure ) {
                 info()[STRUCTURE_LINK].id = structure.id as Id<StructureLink>
-                A.proc.signal.Ssignal({ signalId: linkSignalId, request: 1 })
                 A.res.removeSource(roomName, RESOURCE_ENERGY, info()[STRUCTURE_CONTAINER].id)
             } else {
                 const constructionSite = Game.rooms[roomName].lookForAt(LOOK_CONSTRUCTION_SITES, linkPos)[0]
@@ -161,6 +153,7 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
                 if ( !constructionSite && structures.length + constructionSites.length < CONTROLLER_STRUCTURES[STRUCTURE_LINK][Game.rooms[roomName].controller.level] ) {
                     Game.rooms[roomName].createConstructionSite( linkPos, STRUCTURE_LINK )
                     buildPos = linkPos
+                    // 此时 harvestor 不再将能量放入 container, 所以需要 remove
                     A.res.removeSource(roomName, RESOURCE_ENERGY, info()[STRUCTURE_CONTAINER].id)
                     return [ A.proc.OK_STOP_CUSTOM, 'buildLinkOrContainer' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
                 }
@@ -175,12 +168,9 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         if ( info()[STRUCTURE_LINK].id ) {
             const link = Game.getObjectById(info()[STRUCTURE_LINK].id)
             if ( link.store.getFreeCapacity(RESOURCE_ENERGY) === 0 ) {
-                if ( link.cooldown > 0 ) return [ A.proc.STOP_SLEEP, link.cooldown ] as [ typeof A.proc.STOP_SLEEP, number ]
+                if ( link.cooldown > 0 ) return [ A.proc.STOP_SLEEP, link.cooldown + 1 ] as [ typeof A.proc.STOP_SLEEP, number ]
                 else return A.proc.OK_STOP_CURRENT
             } else {
-                if ( link.store.getUsedCapacity(RESOURCE_ENERGY) === 0 )
-                    A.timer.add(Game.time + 1, signalId => A.proc.signal.Ssignal({ signalId, request: 1 }), [ linkHasEnergySignalId ], `更新 ${link} 包含能量信号量`)
-
                 creep.transfer(link, RESOURCE_ENERGY)
                 return [ A.proc.OK_STOP_CUSTOM, 'gotoSource' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
             }
@@ -221,14 +211,6 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
             repairPos = containerPos
             return [ A.proc.OK_STOP_CUSTOM, 'repairLinkOrContainer' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
         }
-
-        // 触发能量贮存
-        // if ( A.res.query(info()[STRUCTURE_CONTAINER].id, RESOURCE_ENERGY) > CONTAINER_CAPACITY / 2 && Game.rooms[roomName].storage && A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) > CONTAINER_CAPACITY / 4 && A.res.query(Game.rooms[roomName].storage.id, RESOURCE_ENERGY) < getMaintainAmount(RESOURCE_ENERGY) ) {
-        //     const amount = CONTAINER_CAPACITY / 4
-        //     assertWithMsg( A.res.request({ id: info()[STRUCTURE_CONTAINER].id, resourceType: RESOURCE_ENERGY, amount }) === A.proc.OK )
-        //     assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount }) === A.proc.OK )
-        //     T.transfer( Game.getObjectById(info()[STRUCTURE_CONTAINER].id), Game.rooms[roomName].storage, RESOURCE_ENERGY, amount, { priority: T.PRIORITY_CASUAL } )
-        // }
 
         // -> Transfer 到 Container 中
         if ( A.res.query(info()[STRUCTURE_CONTAINER].id, A.res.CAPACITY) > 0 ) {
@@ -310,52 +292,20 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         else return false
     }, [ pid ])
 
-    /** Link 行为 */
-    function runLink() {
-        const linkId = info()[STRUCTURE_LINK].id
-        if ( !linkId || !Game.getObjectById(linkId) ) {
-            if ( A.proc.signal.getValue(linkSignalId) === 1 )
-                A.proc.signal.Swait({ signalId: linkSignalId, lowerbound: 1, request: 1 })
-            return [A.proc.STOP_ERR, `Link [${linkId}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
-        }
-        const link = Game.getObjectById(linkId)
-        if ( link.cooldown > 0 ) return [A.proc.STOP_SLEEP, link.cooldown ] as [ typeof A.proc.STOP_SLEEP, number ]
-        if ( link.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) {
-            assertWithMsg( A.proc.signal.Swait({ signalId: linkHasEnergySignalId, lowerbound: 1, request: 1 }) === A.proc.OK, `运行 Source [${sourceId}] 的 Link ${linkId} 时, 发现无能源可用, 则应当更新信号量成功` )
-            return [ A.proc.OK_STOP_CUSTOM, 'Swait' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
-        }
-
-        if ( getDestinationLinks().filter(id => !!Game.getObjectById(id)).length === 0 ) {
-            return [A.proc.STOP_ERR, `Link [${linkId}] 无法找到目标 Link`] as [ typeof A.proc.STOP_ERR, string ]
-        }
-        const destinationLinkIds = getDestinationLinks().filter(id => !!Game.getObjectById(id) && A.res.query(id, A.res.CAPACITY) > 0)
-        
-        if ( destinationLinkIds.length > 0 ) {
-            const choice = _.min( destinationLinkIds, id => A.res.query(id, RESOURCE_ENERGY) )
-            const amount = Math.max(Math.min(Math.floor(link.store.getUsedCapacity(RESOURCE_ENERGY) / (1 + LINK_LOSS_RATIO)), A.res.query(choice, A.res.CAPACITY)), 1) // 未验证为 1 的情况下的行为
-            assertWithMsg(A.res.request({ id: choice, resourceType: A.res.CAPACITY, amount }, `issueHarvestSourceProc -> 313`) === A.proc.OK, `无法申请 ${choice} ${amount} 容量.`)
-            assertWithMsg(link.transferEnergy(Game.getObjectById(choice), amount) === OK, `${link} 无法传输 ${amount} 能量到 ${choice}.`)
-            A.timer.add(Game.time + 1, (id, amount) => A.res.signal(id, RESOURCE_ENERGY, amount), [choice, amount], `Link ${linkId} -> Link ${choice} 后能量更新`)
-            return A.proc.OK_STOP_CURRENT
-        } else return A.proc.OK_STOP_CURRENT // [ A.proc.OK_STOP_CUSTOM, 'CapacitySwait' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
-    }
-
-    A.proc.createProc([
-        ['Swait', () => A.proc.signal.Swait({ signalId: linkSignalId, lowerbound: 1, request: 0 }, { signalId: destinationLinksReadySignalId, lowerbound: 1, request: 0 }, { signalId: linkHasEnergySignalId, lowerbound: 1, request: 0 })], 
-        // 与关系信号量 无法实现 存在某一有空余容量的 Link 即继续的条件
-        // ['CapacitySwait', () => getDestinationLinks().filter(id => !!Game.getObjectById(id)).length === 0 ? [A.proc.STOP_ERR, `Link [${info()[STRUCTURE_LINK].id}] 无法找到目标 Link`] as [ typeof A.proc.STOP_ERR, string ] : A.res.request(getDestinationLinks().filter(id => !!Game.getObjectById(id)).map(id => ({ id, resourceType: A.res.CAPACITY, amount: { lowerbound: 1, request: 0 } })))], 
-        () => runLink()
-    ], `${sourceId} => Link`)
+    return () => info()[STRUCTURE_LINK].id
 }
 
-export function issueHarvestSource( roomName: string, getDestinationLinks: () => Id<StructureLink>[], destinationLinksReadySignalId: string) {
+export function issueHarvestSource( roomName: string ): (() => Id<StructureLink>)[] {
     const room = Game.rooms[roomName]
     assertWithMsg( room && room.controller && room.controller.my, `无法为非自己控制的房间创建 Harvest Source 方法` )
     const sources = Game.rooms[roomName].find(FIND_SOURCES)
+
+    const senders = []
     
     for ( const source of sources )
         if ( sourceUnit.isSourceFit(source.id) )
-            issueHarvestSourceProc(roomName, source.id, source.pos, getDestinationLinks,  destinationLinksReadySignalId)
+            senders.push(issueHarvestSourceProc(roomName, source.id, source.pos))
         else
             log(LOG_ERR, `无法为 ${source} 创建采集方法`)
+    return senders
 }

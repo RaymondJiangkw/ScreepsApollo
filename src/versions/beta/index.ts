@@ -8,6 +8,7 @@ import { issueClaimRoomWatcher, registerClaimRoom } from './modules/roomClaim'
 import { issueForRoom, registerForRoom } from './room'
 import { registerDefendRoom } from './modules/roomDefense'
 import { registerFastUpgrade } from './modules/fastUpgrade'
+import { registerLinkManage } from './modules/linkManage'
 
 /** AI 挂载入口 */
 export function mountAll() {
@@ -36,6 +37,8 @@ export function registerAll() {
     issueClaimRoomWatcher()
     /** Defend Room 模块 */
     registerDefendRoom()
+    /** Link Manage 模块 */
+    registerLinkManage()
     /** 房间运行模块 */
     registerForRoom()
 

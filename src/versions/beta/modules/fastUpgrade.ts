@@ -394,7 +394,7 @@ function issueFastUpgradeProc(roomName: string, controllerId: Id<StructureContro
     }, [ containerPid, ...upgraderPids ])
 }
 
-export function issueFastUpgrade( roomName: string ) {
+export function issueFastUpgrade( roomName: string ): (() => Id<StructureLink>)[] {
     const room = Game.rooms[roomName]
     assertWithMsg( room && room.controller && room.controller.my, `无法为非自己控制的房间创建 Upgrade 方法` )
     const sources = Game.rooms[roomName].find(FIND_SOURCES) // 根据 Source 数量决定最快升级数量
@@ -404,4 +404,5 @@ export function issueFastUpgrade( roomName: string ) {
     } else {
         log(LOG_ERR, `无法为 ${roomName} 创建迅速升级方法`)
     }
+    return []
 }

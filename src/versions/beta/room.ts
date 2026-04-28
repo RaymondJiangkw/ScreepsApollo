@@ -10,6 +10,7 @@ import { issueHarvestSource } from './modules/harvestSource'
 import { isBelongingToCentralTransferFilling, issueCentralTransfer } from './modules/centralTransfer'
 import { issueDefendProc } from './modules/roomDefense'
 import { issueFastUpgrade } from './modules/fastUpgrade'
+import { issueLinkManage } from './modules/linkManage'
 
 function getEnergy(roomName: string, getWorkerName: () => string, setWorkerName: ( name: string ) => void) {
     let targetId: Id<Source> | Id<StorableStructure> = null
@@ -426,16 +427,16 @@ export function issueForRoom(roomName: string) {
     issuePaintProc(roomName)
     issueDefendProc(roomName)
 
-    /** Source Harvest 模块 */
-    const targetLinkLists: Id<StructureLink>[] = [] // Source 处 Link 传递能量目标 Link 列表 & 信号量
-    const hasTargetLinkSignal = A.proc.signal.createSignal(0)
-    issueHarvestSource(roomName, () => targetLinkLists, hasTargetLinkSignal)
-    /** Quick Energy Filling 模块 */
-    issueQuickEnergyFill(roomName)
-    /** Fast Upgrade 模块 */
-    issueFastUpgrade(roomName)
     /** Central Transfer 模块 */
-    issueCentralTransfer(roomName, () => targetLinkLists, hasTargetLinkSignal)
+    const transitLink = issueCentralTransfer(roomName)
+    /** Source Harvest 模块 */
+    const harvestSourceLinks = issueHarvestSource(roomName)
+    /** Quick Energy Filling 模块 */
+    const quickEnergyFillLinks = issueQuickEnergyFill(roomName)
+    /** Fast Upgrade 模块 */
+    const fastUpgradeLinks = issueFastUpgrade(roomName)
+    /** Link Manage 模块 todo */
+    // issueLinkManage(roomName, [ ...harvestSourceLinks ], [ ...quickEnergyFillLinks, ...fastUpgradeLinks ], transitLink)
 
     /** 监测 TombStone */
     // ...

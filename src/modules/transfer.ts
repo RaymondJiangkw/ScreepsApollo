@@ -24,6 +24,7 @@ type TransferTaskDescription = {
     priority        : PriorityType, 
     afterSignalId?  : string, 
     loseCallback?   : (amount: number, resourceType: ResourceConstant) => void, 
+    callback?       : () => void, 
     finishWithdraw  : boolean, 
     allowLooseGrouping?: boolean
 }
@@ -34,7 +35,9 @@ interface TransferOpts {
     afterSignalId?: string
     /** 当运输过程中丢失时, 触发回调函数 */
     loseCallback?: (amount: number, resourceType: ResourceConstant) => void
-    /** 是否允许不匹配 `loseCallback` 进行合并 */
+    /** 任务完成回调函数 */
+    callback?: () => void
+    /** 是否允许不匹配 `loseCallback` 和 `callback` 进行合并 */
     allowLooseGrouping?: boolean
 }
 
@@ -113,7 +116,7 @@ class TransferModule {
                             // 尝试合并
                             let find = false
                             for ( const t of this.#getTaskQueue(roomName).queue ) {
-                                if ( t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || t.loseCallback === getCurrentTransferTask().loseCallback ) ) {
+                                if ( t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
                                     for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
                                         const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
                                         if ( !!c ) c.amount += amount
@@ -172,7 +175,7 @@ class TransferModule {
                                 // 尝试合并
                                 let find = false
                                 for ( const t of this.#getTaskQueue(roomName).queue ) {
-                                    if ( t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || t.loseCallback === getCurrentTransferTask().loseCallback ) ) {
+                                    if ( t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
                                         for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
                                             const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
                                             if ( !!c ) c.amount += amount
@@ -186,6 +189,8 @@ class TransferModule {
                                     insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
                                     A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
                                 }
+                            } else {
+                                if ( getCurrentTransferTask().callback ) A.timer.add(Game.time + 1, getCurrentTransferTask().callback, [], `Transfer 任务完成后执行回调函数`)
                             }
                             
                             targetDict = {}
@@ -260,7 +265,7 @@ class TransferModule {
                                 // 尝试合并
                                 let find = false
                                 for ( const t of this.#getTaskQueue(roomName).queue ) {
-                                    if ( t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || t.loseCallback === getCurrentTransferTask().loseCallback ) ) {
+                                    if ( t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
                                         for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
                                             const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
                                             if ( !!c ) c.amount += amount
@@ -274,6 +279,8 @@ class TransferModule {
                                     insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
                                     A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
                                 }
+                            } else {
+                                if ( getCurrentTransferTask().callback ) A.timer.add(Game.time + 1, getCurrentTransferTask().callback, [], `Transfer 任务完成后执行回调函数`)
                             }
                             
                             targetDict = {}
@@ -323,7 +330,7 @@ class TransferModule {
                             // 尝试合并
                             let find = false
                             for ( const t of this.#getTaskQueue(roomName).queue ) {
-                                if ( t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || t.loseCallback === getCurrentTransferTask().loseCallback ) ) {
+                                if ( t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
                                     for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
                                         const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
                                         if ( !!c ) c.amount += amount
@@ -337,6 +344,8 @@ class TransferModule {
                                 insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
                                 A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
                             }
+                        } else {
+                            if ( getCurrentTransferTask().callback ) A.timer.add(Game.time + 1, getCurrentTransferTask().callback, [], `Transfer 任务完成后执行回调函数`)
                         }
                         setCurrentTransferTack( null )
                         return [ A.proc.OK_STOP_CUSTOM, 'start' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
@@ -378,6 +387,7 @@ class TransferModule {
                     content: [ { resourceType, amount } ], 
                     priority: opts.priority, afterSignalId: opts.afterSignalId, 
                     loseCallback: opts.loseCallback, 
+                    callback: opts.callback, 
                     finishWithdraw: false, id: generate_random_hex(8), 
                     allowLooseGrouping: opts.allowLooseGrouping
                 }
@@ -389,7 +399,7 @@ class TransferModule {
                         // 尝试合并
                         let find = false
                         for ( const t of this.#takeOverInfo[queueId].queue ) {
-                            if ( t.fromId === taskDescription.fromId && t.toId === taskDescription.toId && t.priority === taskDescription.priority && t.afterSignalId === taskDescription.afterSignalId && ( opts.allowLooseGrouping || t.loseCallback === taskDescription.loseCallback ) ) {
+                            if ( t.fromId === taskDescription.fromId && t.toId === taskDescription.toId && t.priority === taskDescription.priority && t.afterSignalId === taskDescription.afterSignalId && ( opts.allowLooseGrouping || (t.loseCallback === taskDescription.loseCallback && t.callback === taskDescription.callback) ) ) {
                                 const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
                                 if ( !!c ) c.amount += amount
                                 else t.content.push({ resourceType, amount })
@@ -406,7 +416,7 @@ class TransferModule {
                     // 尝试合并
                     let find = false
                     for ( const t of this.#getTaskQueue(from.pos.roomName).queue ) {
-                        if ( t.fromId === taskDescription.fromId && t.toId === taskDescription.toId && t.priority === taskDescription.priority && t.afterSignalId === taskDescription.afterSignalId && ( opts.allowLooseGrouping || t.loseCallback === taskDescription.loseCallback ) ) {
+                        if ( t.fromId === taskDescription.fromId && t.toId === taskDescription.toId && t.priority === taskDescription.priority && t.afterSignalId === taskDescription.afterSignalId && ( opts.allowLooseGrouping || (t.loseCallback === taskDescription.loseCallback && t.callback === taskDescription.callback) ) ) {
                             const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
                             if ( !!c ) c.amount += amount
                             else t.content.push({ resourceType, amount })

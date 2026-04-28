@@ -81,6 +81,7 @@ class CreepModule {
         if ( descriptor.amount === undefined) descriptor.amount = 'auto'
         if ( typeof descriptor.amount !== 'object' ) descriptor.amount = { 1: descriptor.amount }
         if ( descriptor.priority === undefined ) descriptor.priority = PRIORITY_NORMAL
+        if ( descriptor.strict === undefined ) descriptor.strict = false
         
         this.#types[type] = {}
         // 特定型号的 Creep 按照 Controller 等级划分体型
@@ -164,7 +165,7 @@ class CreepModule {
     /**
      * 归还特定的 Creep
      */
-    release(name: string): typeof OK {
+    release(name: string, notMove: boolean = false): typeof OK {
         assertWithMsg(name in Game.creeps, `无法找到 Creep '${name}' 以归还`)
         const creep = Game.creeps[name]
 
@@ -186,6 +187,7 @@ class CreepModule {
                 // 更新信号量
                 A.proc.signal.Ssignal({ signalId: repo.signalId, request: 1 })
             }
+            if ( notMove ) return A.timer.STOP
             if ( _.includes(repo.busy, creep.name) ) return A.timer.STOP
             if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length === 0 ) return A.timer.STOP
             creep.travelTo(creep.pos, { flee: true, ignoreCreeps: false, offRoad: true, avoidStructureTypes: [ STRUCTURE_CONTAINER, STRUCTURE_ROAD ] })
@@ -480,8 +482,6 @@ class CreepSpawnModule {
                     } else
                         spawn = availableSpawns[0]
                     
-                    // 无论能量够不够, 都不再往后检查
-                    flag = true
                     let cost = order.cost
                     let bodies = order.body
                     // 允许缩减规模时, 缩减能量
@@ -501,8 +501,9 @@ class CreepSpawnModule {
                         this.issueRegisterAfterSpawn( name, order.callback )
                         // 删除成功 Spawn 的订单
                         _.remove(this.#repo[roomName][priority] as RequestCreepType[], o => o.requestId === order.requestId)
+                        flag = true
+                        break
                     }
-                    break
                 }
                 if ( flag ) break
             }

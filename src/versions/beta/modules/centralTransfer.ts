@@ -39,15 +39,19 @@ export function isBelongingToCentralTransferFilling(pos: RoomPosition) {
     } else return false
 }
 
-function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuffer: () => Id<StructureLink>[], linkBufferSignal: string) {
+function isStorageEnergyReceivable(storage: StructureStorage) {
+    return A.res.query(storage.id, RESOURCE_ENERGY) < STORAGE_CAPACITY * MAX_ENERGY_PERCENT && A.res.query(storage.id, A.res.CAPACITY) > STORAGE_CAPACITY * MIN_FREE_PERCENT
+}
+
+function issueCentralTransferProc(roomName: string, leftTopPos: Pos ) {
     const posStorage = new RoomPosition(leftTopPos.x + 1, leftTopPos.y + 1, leftTopPos.roomName)
-    const posNuker = new RoomPosition(leftTopPos.x + 1, leftTopPos.y + 2, leftTopPos.roomName)
-    const posPowerSpawn = new RoomPosition(leftTopPos.x + 1, leftTopPos.y + 3, leftTopPos.roomName)
-    const posTerminal = new RoomPosition(leftTopPos.x + 2, leftTopPos.y + 1, leftTopPos.roomName)
+    const posNuker = new RoomPosition(leftTopPos.x + 2, leftTopPos.y + 1, leftTopPos.roomName)
+    const posPowerSpawn = new RoomPosition(leftTopPos.x + 3, leftTopPos.y + 1, leftTopPos.roomName)
+    const posTerminal = new RoomPosition(leftTopPos.x + 1, leftTopPos.y + 2, leftTopPos.roomName)
     const posWork = new RoomPosition(leftTopPos.x + 2, leftTopPos.y + 2, leftTopPos.roomName)
-    const posExtension = new RoomPosition(leftTopPos.x + 2, leftTopPos.y + 3, leftTopPos.roomName)
-    const posLink = new RoomPosition(leftTopPos.x + 3, leftTopPos.y + 1, leftTopPos.roomName)
-    const posFactory = new RoomPosition(leftTopPos.x + 3, leftTopPos.y + 2, leftTopPos.roomName)
+    const posExtension = new RoomPosition(leftTopPos.x + 3, leftTopPos.y + 2, leftTopPos.roomName)
+    const posLink = new RoomPosition(leftTopPos.x + 1, leftTopPos.y + 3, leftTopPos.roomName)
+    const posFactory = new RoomPosition(leftTopPos.x + 2, leftTopPos.y + 3, leftTopPos.roomName)
 
     const takeOverQueue = T.createTakeOver()
 
@@ -58,6 +62,8 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
     let idExtension: Id<StructureExtension> = null
     let idLink: Id<StructureLink> = null
     let idFactory: Id<StructureFactory> = null
+
+    const hasLinkSignalId = A.proc.signal.createSignal(0)
 
     function checkStructures() {
         // 注销既有
@@ -95,10 +101,7 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
         if ( !idLink || !Game.getObjectById(idLink) ) {
             if ( idLink !== null ) {
                 T.removeTakeOver(takeOverQueue.queueId, "all", idLink)
-                const prevLength = getLinkBuffer().length
-                _.remove(getLinkBuffer(), e => e === idLink)
-                if ( prevLength > 0 && getLinkBuffer().length === 0 )
-                    assertWithMsg( A.proc.signal.Swait({ signalId: linkBufferSignal, lowerbound: 1, request: 1 }) === A.proc.OK, getFileNameAndLineNumber() )
+                if ( A.proc.signal.getValue(hasLinkSignalId) === 1 ) assertWithMsg( A.proc.signal.Swait({ signalId: hasLinkSignalId, lowerbound: 1, request: 1 }) === A.proc.OK, getFileNameAndLineNumber() )
             }
             idLink = null
         }
@@ -140,10 +143,8 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
         if ( !idLink && !!structureLink ) {
             idLink = structureLink.id
             T.bindTakeOver(takeOverQueue.queueId, "all", idLink)
-            const prevLength = getLinkBuffer().length
-            getLinkBuffer().push( idLink )
-            if ( prevLength === 0 )
-                assertWithMsg( A.proc.signal.Ssignal({ signalId: linkBufferSignal, request: 1 }) === A.proc.OK, getFileNameAndLineNumber() )
+            if ( A.proc.signal.getValue( hasLinkSignalId ) <= 0 )
+                assertWithMsg( A.proc.signal.Ssignal({ signalId: hasLinkSignalId, request: 1 }) === A.proc.OK, getFileNameAndLineNumber() )
         }
         if ( !idFactory && !!structureFactory ) {
             idFactory = structureFactory.id
@@ -190,6 +191,8 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
                 if ( !currentTransferTask.finishWithdraw ) {
                     insertSortedBy(takeOverQueue.queue, currentTransferTask, 'priority')
                     A.proc.signal.Ssignal({ signalId: takeOverQueue.lengthSignalId, request: 1 })
+                } else {
+                    if ( currentTransferTask.callback ) A.timer.add(Game.time + 1, currentTransferTask.callback, [], `centralTransfer transfer 任务完成后执行回调函数`)
                 }
 
                 targetDict = {}
@@ -219,6 +222,8 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
                 if ( !currentTransferTask.finishWithdraw ) {
                     insertSortedBy(takeOverQueue.queue, currentTransferTask, 'priority')
                     A.proc.signal.Ssignal({ signalId: takeOverQueue.lengthSignalId, request: 1 })
+                } else {
+                    if ( currentTransferTask.callback ) A.timer.add(Game.time + 1, currentTransferTask.callback, [], `centralTransfer transfer 任务完成后执行回调函数`)
                 }
                 
                 targetDict = {}
@@ -273,6 +278,8 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
                 if ( !currentTransferTask.finishWithdraw ) {
                     insertSortedBy(takeOverQueue.queue, currentTransferTask, 'priority')
                     A.proc.signal.Ssignal({ signalId: takeOverQueue.lengthSignalId, request: 1 })
+                } else {
+                    if ( currentTransferTask.callback ) A.timer.add(Game.time + 1, currentTransferTask.callback, [], `centralTransfer transfer 任务完成后执行回调函数`)
                 }
                 
                 targetDict = {}
@@ -304,14 +311,66 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos, getLinkBuff
             // 全部转移完成
             if ( currentTransferTask.finishWithdraw ) {
                 // 全部完成
-                C.release(workerName)
+                C.release(workerName, true)
                 workerName = null
                 targetDict = {}
+                if ( currentTransferTask.callback ) A.timer.add(Game.time + 1, currentTransferTask.callback, [], `centralTransfer transfer 任务完成后执行回调函数`)
                 currentTransferTask = null
                 return [ A.proc.OK_STOP_CUSTOM, 'start' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
             } else return [ A.proc.OK_STOP_CUSTOM, 'withdraw' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
         }]
     ], `${roomName} => CentralTransfer`)
+
+    /** 返回 Link 相关函数 */
+    const receivableAmount = () => idLink && idStorage && Game.getObjectById(idLink) && Game.getObjectById(idStorage) && isStorageEnergyReceivable(Game.getObjectById(idStorage)) ? Math.min(A.res.query(idLink, A.res.CAPACITY_ENERGY), A.res.query(idStorage, A.res.CAPACITY)) : 0
+    const sendableAmount = () => idLink && Game.getObjectById(idLink) ? Math.min(A.res.query(idLink, A.res.CAPACITY_ENERGY), idStorage && Game.getObjectById(idStorage) ? A.res.query(idStorage, RESOURCE_ENERGY) : 0) : 0
+    return {
+        'getId': () => idLink, 
+        existSignalId: hasLinkSignalId, 
+        receivableAmount: receivableAmount, 
+        sendableAmount: sendableAmount, 
+        /**
+         * transferEnergy 保证成功后立即调用
+         * @param amount 需要是 decay 后获得的实际数量
+         */
+        receive: (amount: number, callback: () => void) => {
+            assertWithMsg( amount <= receivableAmount(), getFileNameAndLineNumber() )
+            assertWithMsg( A.res.request( { id: idLink, resourceType: A.res.CAPACITY_ENERGY, amount } ) === A.proc.OK, getFileNameAndLineNumber() )
+            assertWithMsg( A.res.request( { id: idStorage, resourceType: A.res.CAPACITY, amount } ) === A.proc.OK, getFileNameAndLineNumber() )
+            A.timer.add(Game.time + 1, () => {
+                // idLink energy 一进一出, 不用再重复申请
+                T.transfer( idLink, idStorage, RESOURCE_ENERGY, amount, { callback } )
+            }, [], `将资源从 Link 转移到 Storage`)
+        }, 
+        send: (amount: number, target: Id<StructureLink>, sendCallback: () => void) => {
+            const effectiveAmount = amount - Math.ceil(amount * LINK_LOSS_RATIO)
+            assertWithMsg( effectiveAmount > 0, getFileNameAndLineNumber() )
+            const srcLink = Game.getObjectById(idLink)
+            assertWithMsg( !!srcLink && srcLink.cooldown <= 0, getFileNameAndLineNumber() )
+            const tarLink = Game.getObjectById(target)
+            assertWithMsg( !!tarLink, getFileNameAndLineNumber() )
+            const storage = Game.getObjectById(idStorage)
+            assertWithMsg( !!storage, getFileNameAndLineNumber() )
+
+            assertWithMsg( A.res.query(storage.id, RESOURCE_ENERGY) >= amount, getFileNameAndLineNumber() )
+            assertWithMsg( A.res.query(srcLink.id, A.res.CAPACITY_ENERGY) >= amount, getFileNameAndLineNumber() )
+            assertWithMsg( A.res.query(tarLink.id, A.res.CAPACITY_ENERGY) >= effectiveAmount, getFileNameAndLineNumber() )
+
+            A.res.request({ id: idStorage, resourceType: RESOURCE_ENERGY, amount })
+            A.res.request({ id: idLink, resourceType: A.res.CAPACITY_ENERGY, amount })
+            A.res.request({ id: target, resourceType: A.res.CAPACITY_ENERGY, amount: effectiveAmount })
+
+            T.transfer(idStorage, idLink, RESOURCE_ENERGY, amount, { callback: () => {
+                assertWithMsg( A.res.request({ id: idLink, resourceType: RESOURCE_ENERGY, amount }) === A.proc.OK, `centralTransfer -> L364` )
+                assertWithMsg( Game.getObjectById(idLink).transferEnergy(Game.getObjectById(target), amount) === OK, `centralTransfer -> L365` )
+                A.timer.add(Game.time + 1, () => {
+                    A.res.signal(idLink, A.res.CAPACITY_ENERGY, amount)
+                    A.res.signal(target, RESOURCE_ENERGY, effectiveAmount)
+                    sendCallback()
+                }, [], `将资源从 ${idLink} 转移到 ${target}`)
+            } })
+        }
+    }
 }
 
 function issueEnergyStoreProc(roomName: string, leftTopPos: Pos) {
@@ -337,14 +396,14 @@ function issueEnergyStoreProc(roomName: string, leftTopPos: Pos) {
         }
     ], `${roomName} => Energy Store`, true)
     A.proc.trigger("watch", () => {
-        return !!Game.rooms[roomName] && !!Game.rooms[roomName].storage && A.res.query(Game.rooms[roomName].storage.id, RESOURCE_ENERGY) < STORAGE_CAPACITY * MAX_ENERGY_PERCENT && A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) > STORAGE_CAPACITY * MIN_FREE_PERCENT && !!A.res.requestSource(roomName, RESOURCE_ENERGY, null, null, false, id => Game.getObjectById(id).structureType === STRUCTURE_CONTAINER).id
+        return !!Game.rooms[roomName] && !!Game.rooms[roomName].storage && isStorageEnergyReceivable(Game.rooms[roomName].storage) && !!A.res.requestSource(roomName, RESOURCE_ENERGY, null, null, false, id => Game.getObjectById(id).structureType === STRUCTURE_CONTAINER).id
     }, [ pid ])
 }
 
-export function issueCentralTransfer(roomName: string, getLinkBuffer: () => Id<StructureLink>[], linkBufferSignal: string) {
+export function issueCentralTransfer(roomName: string) {
     const planInfo = P.plan(roomName, 'unit', unitName)
     assertWithMsg( planInfo !== null, `运行核心转移模块的房间, 一定需要是可规划完成的` )
     const leftTopPos = planInfo.leftTops[0]
-    issueCentralTransferProc(roomName, leftTopPos, getLinkBuffer, linkBufferSignal)
     issueEnergyStoreProc(roomName, leftTopPos)
+    return issueCentralTransferProc(roomName, leftTopPos)
 }
