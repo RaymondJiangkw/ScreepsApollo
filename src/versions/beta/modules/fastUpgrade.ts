@@ -188,7 +188,8 @@ export function registerFastUpgrade() {
             3: [ CARRY, WORK, WORK, WORK, MOVE, MOVE ], 
             4: [ CARRY, WORK, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE ]
         }, 
-        amount: 2 // At most 2 due to at most 2 sources
+        amount: 2, // At most 2 due to at most 2 sources, 
+        priority: C.PRIORITY_CASUAL
     })
 }
 
@@ -385,6 +386,7 @@ function issueFastUpgradeProc(roomName: string, controllerId: Id<StructureContro
                     if ( creep.upgradeController(Game.rooms[roomName].controller) === ERR_NOT_IN_RANGE ) creep.moveTo(Game.rooms[roomName].controller)
                     return A.proc.OK_STOP_CURRENT
                 }
+                return A.proc.OK_STOP_CURRENT
             }
         ], `${roomName} Fast Upgrade's Upgrader ${upgraderIdx}`, true))
     }
@@ -399,10 +401,10 @@ export function issueFastUpgrade( roomName: string ): (() => Id<StructureLink>)[
     assertWithMsg( room && room.controller && room.controller.my, `无法为非自己控制的房间创建 Upgrade 方法` )
     const sources = Game.rooms[roomName].find(FIND_SOURCES) // 根据 Source 数量决定最快升级数量
     issueUpgradeProc(roomName)
-    if ( controllerUnit.isControllerFit(room.controller.id) ) {
-        issueFastUpgradeProc(roomName, room.controller.id, room.controller.pos, sources.length)
-    } else {
-        log(LOG_ERR, `无法为 ${roomName} 创建迅速升级方法`)
-    }
+    // if ( controllerUnit.isControllerFit(room.controller.id) ) {
+    //     issueFastUpgradeProc(roomName, room.controller.id, room.controller.pos, sources.length)
+    // } else {
+    //     log(LOG_ERR, `无法为 ${roomName} 创建迅速升级方法`)
+    // }
     return []
 }

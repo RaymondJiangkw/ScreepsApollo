@@ -1,3 +1,4 @@
+import { Apollo as A } from '@/framework/apollo'
 import { registerCommonConstructions } from './config.construction'
 import { registerProduction } from './config.production'
 import { registerHarvestSource } from './modules/harvestSource'
@@ -50,4 +51,8 @@ export function registerAll() {
         if ( !room.controller || !room.controller.my || room.find(FIND_STRUCTURES, { filter: { structureType: STRUCTURE_SPAWN } }).length <= 0 ) continue
         issueForRoom(roomName)
     }
+
+    /** Periodical Global Reset before Debugging */
+    // const RESET_TICK_INTERVAL = 20000 * 2 // 2 hrs
+    // A.timer.add(Game.time + RESET_TICK_INTERVAL, () => Game.cpu.halt(), [], `Reset Global`, RESET_TICK_INTERVAL)
 }

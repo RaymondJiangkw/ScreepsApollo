@@ -89,7 +89,7 @@ export const errorMapper = function (next) {
                 console.log(`<text style="color:#ef9a9a">${errorMessage}</text>`)
             }
             // 处理不了，直接抛出
-            else throw e
+            // else throw e
         }
     }
 }

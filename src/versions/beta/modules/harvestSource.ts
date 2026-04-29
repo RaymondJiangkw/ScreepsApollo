@@ -285,12 +285,6 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         ['repairLinkOrContainer', () => repairLinkOrContainer( harvesterName )], 
         ['JUMP', () => true, 'gotoSource'], 
     ], `${sourceId} => Harvest`)
-    /** 能量生出后触发 */
-    A.proc.trigger('watch', () => {
-        const source = Game.getObjectById(sourceId)
-        if ( source ) return source.energy > 0
-        else return false
-    }, [ pid ])
 
     return () => info()[STRUCTURE_LINK].id
 }

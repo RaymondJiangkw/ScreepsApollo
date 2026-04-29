@@ -362,7 +362,8 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos ) {
 
             T.transfer(idStorage, idLink, RESOURCE_ENERGY, amount, { callback: () => {
                 assertWithMsg( A.res.request({ id: idLink, resourceType: RESOURCE_ENERGY, amount }) === A.proc.OK, `centralTransfer -> L364` )
-                assertWithMsg( Game.getObjectById(idLink).transferEnergy(Game.getObjectById(target), amount) === OK, `centralTransfer -> L365` )
+                const retCode = Game.getObjectById(idLink).transferEnergy(Game.getObjectById(target), amount)
+                assertWithMsg( retCode === OK, `centralTransfer -> L365, ${idLink}, ${target}, ${amount}` )
                 A.timer.add(Game.time + 1, () => {
                     A.res.signal(idLink, A.res.CAPACITY_ENERGY, amount)
                     A.res.signal(target, RESOURCE_ENERGY, effectiveAmount)

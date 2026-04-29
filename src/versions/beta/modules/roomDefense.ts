@@ -67,12 +67,23 @@ function issueRoomTowerDefend(roomName: string) {
                 towers.forEach(tower => {
                     if ( A.res.query(tower.id, RESOURCE_ENERGY) >= TOWER_ENERGY_COST  ) {
                         if ( !!targetCreep ) {
-                            assertWithMsg( A.res.request({ id: tower.id, resourceType: RESOURCE_ENERGY, amount: TOWER_ENERGY_COST }, 'issueTowerProc -> 396') === A.proc.OK, getFileNameAndLineNumber() )
+                            assertWithMsg( A.res.request({ id: tower.id, resourceType: RESOURCE_ENERGY, amount: TOWER_ENERGY_COST }) === A.proc.OK, 'issueTowerProc -> 396' )
                             A.timer.add(Game.time + 1, id => A.res.signal(id, A.res.CAPACITY_ENERGY, TOWER_ENERGY_COST), [ tower.id ], `更新塔 ${tower.id} 的容量`)
                             tower.attack(targetCreep)
                         }
                     }
                 })
+            } else {
+                const rampartsCloseToDisappear = Game.rooms[roomName].find(FIND_STRUCTURES).filter(s => s.structureType === STRUCTURE_RAMPART && s.hits <= RAMPART_DECAY_AMOUNT) as StructureRampart[]
+                if ( rampartsCloseToDisappear.length > 0 ) {
+                    towers.forEach(tower => {
+                        if ( A.res.query(tower.id, RESOURCE_ENERGY) >= TOWER_CAPACITY / 2 ) {
+                            assertWithMsg( A.res.request({ id: tower.id, resourceType: RESOURCE_ENERGY, amount: TOWER_ENERGY_COST }) === A.proc.OK )
+                            A.timer.add(Game.time + 1, id => A.res.signal(id, A.res.CAPACITY_ENERGY, TOWER_ENERGY_COST), [ tower.id ], `更新塔 ${tower.id} 的容量`)
+                            tower.repair(rampartsCloseToDisappear[0])
+                        }
+                    })
+                }
             }
 
             towers.forEach(tower => {
@@ -222,6 +233,6 @@ export function issueDefendProc(roomName: string) {
     const planInfo = P.plan(roomName, 'unit', 'centralSpawn')
     const safePos = new RoomPosition(planInfo.leftTops[0].x + 3, planInfo.leftTops[0].y, roomName)
 
-    issueRoomAttackHealDefend(roomName, safePos)
+    // issueRoomAttackHealDefend(roomName, safePos)
     issueRoomTowerDefend(roomName)
 }

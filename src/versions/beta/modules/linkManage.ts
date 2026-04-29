@@ -16,6 +16,7 @@ interface TransitLinkInfo {
 }
 
 const MIN_SEND_AMOUNT = 700
+const MIN_RECV_AMOUNT = 100
 
 export function registerLinkManage() {
     C.design('cleaner', {
@@ -61,7 +62,7 @@ export function issueLinkManage( roomName: string, senderLinkIdGetters: (() => I
             if ( transitLink.store.getUsedCapacity(RESOURCE_ENERGY) > 0 ) {
                 const amount = Math.min(transitLink.store.getUsedCapacity(RESOURCE_ENERGY), creep.store.getFreeCapacity())
                 assertWithMsg( A.res.request({id: transitLink.id, resourceType: RESOURCE_ENERGY, amount}) === A.proc.OK, `linkManage -> L63` )
-                assertWithMsg( creep.withdraw(transitLink, RESOURCE_ENERGY) === OK, `linkManage -> L64` )
+                assertWithMsg( creep.withdraw(transitLink, RESOURCE_ENERGY, amount) === OK, `linkManage -> L64` )
                 A.timer.add(Game.time + 1, id => A.res.signal(id, A.res.CAPACITY_ENERGY, amount), [transitLink.id], `${transitLink} 资源更新`)
                 return A.proc.OK_STOP_CURRENT
             }
@@ -81,14 +82,13 @@ export function issueLinkManage( roomName: string, senderLinkIdGetters: (() => I
             /** 优先发送 */
             const sendableAmount = transitLinkInfo.sendableAmount()
             // console.log(sendableAmount, transitLink.cooldown)
-            if ( sendableAmount > 0 && transitLink.cooldown <= 0 ) {
+            if ( sendableAmount >= MIN_SEND_AMOUNT && transitLink.cooldown <= 0 ) {
                 for ( const receiverLinkIdGetter of receiverLinkIdGetters ) {
                     const receiverLink = Game.getObjectById(receiverLinkIdGetter())
-                    if ( !receiverLink || receiverLink.cooldown > 0 || A.res.query(receiverLink.id, A.res.CAPACITY_ENERGY) <= 0 ) continue
+                    if ( !receiverLink || receiverLink.cooldown > 0 || A.res.query(receiverLink.id, A.res.CAPACITY_ENERGY) <= MIN_RECV_AMOUNT ) continue
                     const receivableAmount = A.res.query(receiverLink.id, A.res.CAPACITY_ENERGY)
-                    const sendAmount = Math.min(Math.ceil(receivableAmount / (1 - LINK_LOSS_RATIO)), sendableAmount)
-                    const receiveAmount = sendAmount - Math.ceil(LINK_LOSS_RATIO * sendAmount)
-                    assertWithMsg( receiveAmount <= receivableAmount, getFileNameAndLineNumber() )
+                    // transferEnergy 时, 根据发送量判定接收方是否有足够容量
+                    const sendAmount = Math.min(receivableAmount, sendableAmount)
                     transitLinkStatus = 'busy'
                     transitLinkInfo.send(sendAmount, receiverLink.id, () => transitLinkStatus = 'idle')
                     return A.proc.OK_STOP_CURRENT
@@ -98,14 +98,13 @@ export function issueLinkManage( roomName: string, senderLinkIdGetters: (() => I
             /** 其次接收 */
             const receivableAmount = transitLinkInfo.receivableAmount()
             // console.log(receivableAmount)
-            if ( receivableAmount > 0 ) {
+            if ( receivableAmount > MIN_RECV_AMOUNT ) {
                 for ( const senderLinkIdGetter of senderLinkIdGetters ) {
                     const senderLink = Game.getObjectById(senderLinkIdGetter())
                     // 当且仅当快满的时候发送
                     if ( !senderLink || senderLink.cooldown > 0 || senderLink.store.getUsedCapacity(RESOURCE_ENERGY) < MIN_SEND_AMOUNT ) continue
-                    const sendAmount = Math.min(Math.ceil(receivableAmount / (1 - LINK_LOSS_RATIO)), senderLink.store.getUsedCapacity(RESOURCE_ENERGY))
+                    const sendAmount = Math.min(receivableAmount, senderLink.store.getUsedCapacity(RESOURCE_ENERGY))
                     const receiveAmount = sendAmount - Math.ceil(LINK_LOSS_RATIO * sendAmount)
-                    assertWithMsg( receiveAmount <= receivableAmount, getFileNameAndLineNumber() )
                     assertWithMsg( senderLink.transferEnergy(Game.getObjectById(transitLinkInfo.getId()), sendAmount) === OK, getFileNameAndLineNumber() )
                     transitLinkStatus = 'busy'
                     transitLinkInfo.receive(receiveAmount, () => transitLinkStatus = 'idle')

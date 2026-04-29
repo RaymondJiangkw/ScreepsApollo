@@ -33,7 +33,7 @@ export function registerClaimRoom() {
     })
 }
 
-export function issueClaimRoomProc(srcRoomName: string, tarRoomName: string, getIssuedFlags: () => string[], setIssuedFlags: (arr: string[]) => void) {
+function issueClaimRoomProc(srcRoomName: string, tarRoomName: string, getIssuedFlags: () => string[], setIssuedFlags: (arr: string[]) => void) {
     let claimerName = null
     let upgraderName = null
     let builderName = null

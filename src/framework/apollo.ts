@@ -492,7 +492,7 @@ class ProcessModule {
                             stackError(errorMessage)
                             /** 发送 错误 到邮箱 */
                             Game.notify(errorMessage)
-                        } else throw e
+                        }
                         returnCode = this.STOP_ERR
                     }
                     
@@ -566,6 +566,10 @@ class ProcessModule {
                         proc.pc = proc.tagDict[tag]
                         processIdReadyQueue.push(id)
                         break
+                    } else {
+                        log(LOG_ERR, `运行进程 ${proc} [${proc.pc}] 时, 竟然无返回! 当作 OK`)
+                        stackLog(`运行进程 ${proc} [${proc.pc}] 时, 竟然无返回! 当作 OK`)
+                        proc.pc++
                     }
                 }
             }
@@ -915,6 +919,8 @@ class StructureResourceManager {
         if ( structure instanceof StructureLab || structure instanceof StructureNuker || structure instanceof StructurePowerSpawn ) {
             this.getSignal(CAPACITY_ENERGY)
             this.getSignal(CAPACITY_MINERAL)
+        } else if ( structure instanceof StructureLink ) {
+            this.getSignal(CAPACITY_ENERGY)
         } else this.getSignal(CAPACITY)
     }
 }
@@ -948,11 +954,11 @@ class ResourceModule {
     }
     describeCapacity(structure: StorableStructure, resourceType: ResourceConstant | "all") {
         if ( resourceType === "all" ) {
-            assertWithMsg( !(structure instanceof StructureLab || structure instanceof StructurePowerSpawn || structure instanceof StructureNuker), getFileNameAndLineNumber() )
+            assertWithMsg( !(structure instanceof StructureLab || structure instanceof StructurePowerSpawn || structure instanceof StructureNuker || structure instanceof StructureLink), getFileNameAndLineNumber() )
             return CAPACITY
         }
 
-        if ( structure instanceof StructureLab || structure instanceof StructurePowerSpawn || structure instanceof StructureNuker ) {
+        if ( structure instanceof StructureLab || structure instanceof StructurePowerSpawn || structure instanceof StructureNuker || structure instanceof StructureLink ) {
             if ( resourceType === RESOURCE_ENERGY ) return CAPACITY_ENERGY
             else return CAPACITY_MINERAL
         }

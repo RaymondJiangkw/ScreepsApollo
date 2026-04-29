@@ -94,12 +94,6 @@ function issueFillProc(roomName: string) {
             return A.proc.OK_STOP_CURRENT
         }
 
-        /** 确认房间位置 */
-        if ( creep.pos.roomName !== roomName ) {
-            creep.moveToRoom(roomName)
-            return A.proc.OK_STOP_CURRENT
-        }
-
         const spawns = Game.rooms[roomName].find<FIND_STRUCTURES, StructureSpawn | StructureExtension | StructureTower>(FIND_STRUCTURES, { filter: s => (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_EXTENSION) && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && !isBelongingToQuickEnergyFilling(s.pos) })
 
         if ( spawns.length === 0 ) {
@@ -108,12 +102,15 @@ function issueFillProc(roomName: string) {
             workerName = null
             return A.proc.STOP_SLEEP
         }
+
+        if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) <= 0 ) return A.proc.OK
+
         const spawn = _.min(spawns, s => creep.pos.getRangeTo(s))
 
         /** 已经接近 Spawn */
         if ( creep.pos.roomName === roomName && creep.pos.getRangeTo(spawn) <= 1 ) {
             creep.transfer(spawn, RESOURCE_ENERGY)
-            return A.proc.OK_STOP_NEXT
+            return A.proc.OK_STOP_CURRENT
         }
 
         creep.moveTo(spawn)
@@ -436,7 +433,7 @@ export function issueForRoom(roomName: string) {
     /** Fast Upgrade 模块 */
     const fastUpgradeLinks = issueFastUpgrade(roomName)
     /** Link Manage 模块 todo */
-    // issueLinkManage(roomName, [ ...harvestSourceLinks ], [ ...quickEnergyFillLinks, ...fastUpgradeLinks ], transitLink)
+    issueLinkManage(roomName, [ ...harvestSourceLinks ], [ ...quickEnergyFillLinks, ...fastUpgradeLinks ], transitLink)
 
     /** 监测 TombStone */
     // ...
