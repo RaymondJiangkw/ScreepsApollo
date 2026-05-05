@@ -241,6 +241,7 @@ class CreepModule {
 
     /** 补充特定型号的 Creep 数量 (不检查是否有 Creep 应当消亡) */
     #replenish(type: string, roomName: string, workPos?: RoomPosition) {
+        if ( !Game.rooms[roomName] || !Game.rooms[roomName].controller ) return
         const repo = this.#getRepo(type, roomName)
         const controllerLevel = Game.rooms[roomName].controller.level
         const descriptor = this.#types[type][controllerLevel]
@@ -316,6 +317,14 @@ class CreepModule {
             this.#replenish(Memory.creeps[name].spawnType, Memory.creeps[name].spawnRoomName)
         }
         delete Memory.creeps[name]
+
+        // 移动 creep 到空闲位置
+        A.timer.add(Game.time + 1, creepName => {
+            const creep = Game.creeps[creepName]
+            if ( !creep ) return A.timer.STOP
+            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length === 0 ) return A.timer.STOP
+            creep.travelTo(creep.pos, { flee: true, ignoreCreeps: false, offRoad: true, avoidStructureTypes: [ STRUCTURE_CONTAINER, STRUCTURE_ROAD ] })
+        }, [ name ], `闲置 ${name}`, 1)
     }
 
     constructor(context: CreepModuleContext) {

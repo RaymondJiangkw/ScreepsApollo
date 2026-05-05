@@ -290,7 +290,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos) {
     function runCreepDrop( getFillerName: () => string, setFillerName: (name: string) => void ) {
         const creep = Game.creeps[getFillerName()]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(getFillerName())
             setFillerName(null)
             return [A.proc.STOP_ERR, `Creep 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -302,7 +302,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos) {
     function runCreepMoveTo( getFillerName: () => string, setFillerName: (name: string) => void, workerPos: Pos ) {
         const creep = Game.creeps[getFillerName()]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(getFillerName())
             setFillerName(null)
             return [A.proc.STOP_ERR, `Creep 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -325,7 +325,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos) {
         
         const creep = Game.creeps[getFillerName()]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(getFillerName())
             setFillerName(null)
             if ( getCurrentTask() !== null ) {
@@ -368,7 +368,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos) {
     function runCreepTransfer( getFillerName: () => string, setFillerName: (name: string) => void, workerPos: Pos, pool: TransferTaskDescriptor[], poolSignal: string, getCurrentTask: () => TransferTaskDescriptor, setCurrentTask: ( task: TransferTaskDescriptor ) => void ) {
         const creep = Game.creeps[getFillerName()]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(getFillerName())
             setFillerName(null)
             if ( Game.getObjectById(getCurrentTask().toId) )

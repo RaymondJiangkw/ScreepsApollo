@@ -960,8 +960,8 @@ class PlanModule {
         assertWithMsg( A.proc.signal.Ssignal({ signalId, request: cnt }) === A.proc.OK, getFileNameAndLineNumber() )
     }
     #getRoom2UnitTagSignal(roomName: string, unitName: string, tagName: string): string {
-        assertWithMsg( this.plan(roomName, 'unit', unitName) !== null, `${roomName} 的建筑单元 ${unitName} 规划在获取是否完成信号量时, 需要一定规划成功` )
-        assertWithMsg( Game.rooms[roomName] ? true : false, `获取 ${roomName} 建筑单元 ${unitName} 规划是否完成信号量时, 一定需要有视野` )
+        // assertWithMsg( this.plan(roomName, 'unit', unitName) !== null, `${roomName} 的建筑单元 ${unitName} 规划在获取是否完成信号量时, 需要一定规划成功` )
+        // assertWithMsg( Game.rooms[roomName] ? true : false, `获取 ${roomName} 建筑单元 ${unitName} 规划是否完成信号量时, 一定需要有视野` )
         if ( !(roomName in this.#room2UnitTagSignal) ) this.#room2UnitTagSignal[roomName] = {}
         if ( !(unitName in this.#room2UnitTagSignal[roomName]) ) this.#room2UnitTagSignal[roomName][unitName] = {}
 

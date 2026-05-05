@@ -53,6 +53,6 @@ export function registerAll() {
     }
 
     /** Periodical Global Reset before Debugging */
-    // const RESET_TICK_INTERVAL = 20000 * 2 // 2 hrs
+    // const RESET_TICK_INTERVAL = 2000 * 2 // 2 hrs
     // A.timer.add(Game.time + RESET_TICK_INTERVAL, () => Game.cpu.halt(), [], `Reset Global`, RESET_TICK_INTERVAL)
 }

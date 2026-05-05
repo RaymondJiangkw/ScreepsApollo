@@ -433,7 +433,7 @@ class ProcessModule {
         log(LOG_INFO, `开始运行进程, 进程池当前大小为 ${this.#processIdReadyQueue.length} ...`)
         // 校验当前没有正在运行的进程
         if ( this.#currentProcId !== -1 ) {
-            log(LOG_ERR, `进程模块在 tick 开始时, 发现已有正在运行的进程 Id ${this.#currentProcId}`)
+            log(LOG_ERR, `进程模块在 tick 开始时, 发现已有正在运行的进程 Id ${this.#currentProcId} [${this.#procDict[this.#currentProcId].description}]`)
             this.#currentProcId = -1
         }
         // 创建临时就绪进程 Id 队列
@@ -444,7 +444,7 @@ class ProcessModule {
             const id = this.#processIdReadyQueue.shift()
             const proc = this.#procDict[id]
 
-            // log(LOG_INFO, `运行🔄 进程 [${proc.description}] ...`)
+            log(LOG_INFO, `运行🔄 进程 [${proc.description}](${proc.pc}) ...`)
 
             // 修改状态
             this.#currentProcId = id
@@ -567,9 +567,14 @@ class ProcessModule {
                         processIdReadyQueue.push(id)
                         break
                     } else {
-                        log(LOG_ERR, `运行进程 ${proc} [${proc.pc}] 时, 竟然无返回! 当作 OK`)
-                        stackLog(`运行进程 ${proc} [${proc.pc}] 时, 竟然无返回! 当作 OK`)
-                        proc.pc++
+                        log(LOG_ERR, `运行进程 ${proc} [${proc.pc}] 时, 竟然无返回! 当作 OK_STOP_CURRENT`)
+                        stackLog(`运行进程 ${proc} [${proc.pc}] 时, 竟然无返回! 当作 OK_STOP_CURRENT`)
+                        // 主动停止, 仍然从本条原子函数开始
+                        proc.state = PROCESS_STATE_READY
+                        processIdReadyQueue.push(id)
+                        // 复原状态
+                        this.#currentProcId = -1
+                        break
                     }
                 }
             }

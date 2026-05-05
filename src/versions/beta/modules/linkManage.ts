@@ -42,7 +42,7 @@ export function issueLinkManage( roomName: string, senderLinkIdGetters: (() => I
         () => C.acquire('cleaner', roomName, name => cleanerName = name), 
         () => {
             const creep = Game.creeps[cleanerName]
-            if ( !creep ) {
+            if ( !creep || creep.hits < creep.hitsMax ) {
                 C.cancel(cleanerName)
                 cleanerName = null
                 return [ A.proc.STOP_ERR, `Creep ${cleanerName} 无法找到` ] as [ typeof A.proc.STOP_ERR, string ]

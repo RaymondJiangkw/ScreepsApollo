@@ -74,7 +74,7 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
     function gotoSource( name: string ) {
         const creep = Game.creeps[name]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(name)
             harvesterName = null
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -123,7 +123,7 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
     function buildRepairOrTransfer(name: string) {
         const creep = Game.creeps[name]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(name)
             harvesterName = null
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -226,7 +226,7 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
     function buildLinkOrContainer(name: string) {
         const creep = Game.creeps[name]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(name)
             harvesterName = null
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -252,7 +252,7 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
     function repairLinkOrContainer(name: string) {
         const creep = Game.creeps[name]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(name)
             harvesterName = null
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]

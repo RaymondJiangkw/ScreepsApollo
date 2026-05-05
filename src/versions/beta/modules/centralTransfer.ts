@@ -183,7 +183,7 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos ) {
         () => C.acquire('centralTransferer', roomName, name => workerName = name, posWork), 
         () => {
             const creep = Game.creeps[workerName]
-            if ( !creep ) {
+            if ( !creep || creep.hits < creep.hitsMax ) {
                 C.cancel(workerName)
                 workerName = null
                 // 恢复任务
@@ -212,7 +212,7 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos ) {
         [ 'withdraw', () => {
             const creep = Game.creeps[workerName]
             /** 检测到错误, 立即释放资源 */
-            if ( !creep || creep.ticksToLive < 3 ) {
+            if ( !creep || creep.ticksToLive < 3 || creep.hits < creep.hitsMax ) {
                 if ( creep ) creep.suicide()
                 // 释放 Creep
                 C.cancel(workerName)
@@ -269,7 +269,7 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos ) {
         ['transfer', () => {
             const creep = Game.creeps[workerName]
             /** 检测到错误, 立即释放资源 */
-            if ( !creep ) {
+            if ( !creep || creep.hits < creep.hitsMax ) {
                 // 释放 Creep
                 C.cancel(workerName)
                 workerName = null
@@ -301,7 +301,7 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos ) {
 
             const resourceType = Object.keys(targetDict)[0] as ResourceConstant
             const amount = targetDict[resourceType]
-            assertWithMsg( amount <= creep.store[resourceType] && amount <= target.store.getFreeCapacity(resourceType), `transfer -> 242 ${amount}}` )
+            assertWithMsg( amount <= creep.store[resourceType] && amount <= target.store.getFreeCapacity(resourceType), `centralTransfer -> 242 ${amount}` )
             assertWithMsg( creep.transfer(target, resourceType, amount) === OK, getFileNameAndLineNumber() )
             A.timer.add(Game.time + 1, (targetId, resourceType, amount) => A.res.signal(targetId, resourceType, amount), [target.id, resourceType, amount], `转移资源后, 更新目标建筑相应资源的数量`)
             delete targetDict[resourceType]

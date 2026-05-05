@@ -1,0 +1,141 @@
+[11:44:49 PM][shard3][79899691] 📝  运行🔄 进程 [E11N14 => Fill](1) ...
+[11:44:49 PM][shard3][79899691] ⌛  🔄 进程 [E11N14 => Fill] 消耗 0.25, 停止在 1.
+[11:44:49 PM][shard3][79899691] 📝  运行🔄 进程 [E11N14 => Spawn](0) ...
+[11:44:49 PM][shard3][79899691] 🐛  E11N14 当前优先级为 2 的等待生产 Creep 的数量为 2
+[11:44:49 PM][shard3][79899691] ⌛  🔄 进程 [E11N14 => Spawn] 消耗 0.03, 停止在 0.
+[11:44:49 PM][shard3][79899691] 🐛  休眠进程池: 34:[E11N14 => Energy Store,0],49:[E11N14 Fast Upgrade Build [container, [room E11N14 pos 11,23]],0],50:[E11N14 Fast Upgrade's Container,0],51:[E11N14 Fast Upgrade's Upgrader 0,0],52:[E11N14 Fast Upgrade's Upgrader 1,0],3:[E11N17 => Spawn,0],54:[清理 E11N13 被摧毁的建筑,0],57:[清理 E11N14 被摧毁的建筑,0],1:[E11N13 => Spawn,0],4:[准备 Claim Room 进程,0],11:[E11N13 => CentralTransfer 建筑注册注销,0],60:[清理 E11N17 被摧毁的建筑,0],18:[E11N13 => Quick Filling (Left),0],19:[E11N13 => Quick Filling (Right),0],6:[E11N13 => Fill,0],33:[E11N14 => Paint,0] ...
+[11:44:49 PM][shard3][79899691] 🐛  阻塞进程池: 12:[E11N13 => CentralTransfer,1],15:[E11N13 => Link Filling,0],28:[E11N13 => Link 管理,0],29:[E11N14 => Tower,0],35:[E11N14 => CentralTransfer 建筑注册注销,0],36:[E11N14 => CentralTransfer,0],39:[E11N14 => Link Filling,0],40:[E11N14 => Container Filling (Left),0],41:[E11N14 => Container Filling (Right),0],42:[E11N14 => Quick Filling (Left),0],43:[E11N14 => Quick Filling (Right),0],44:[E11N14 => Quick Filler (Left Top),0],45:[E11N14 => Quick Filler (Left Bottom),0],46:[E11N14 => Quick Filler (Right Top),0],47:[E11N14 => Quick Filler (Right Bottom),0],53:[E11N14 => Link 管理,0],21:[E11N13 => Quick Filler (Left Bottom),4],20:[E11N13 => Quick Filler (Left Top),4],22:[E11N13 => Quick Filler (Right Top),4],23:[E11N13 => Quick Filler (Right Bottom),4],16:[E11N13 => Container Filling (Left),3],17:[E11N13 => Container Filling (Right),3],24:[E11N13 => Upgrade (always on),0],9:[E11N13 => Paint,1],26:[E11N13 Fast Upgrade's Upgrader 0,2],25:[E11N13 Fast Upgrade's Container,1],27:[E11N13 Fast Upgrade's Upgrader 1,2],10:[E11N13 => Energy Store,0],58:[E11N13 => E11N17 Upgrade,1],59:[E11N13 => E11N17 Build,2],14:[5bbcad8e9099fc012e63770f => Harvest,0],8:[E11N13 => Repair,1],13:[5bbcad8e9099fc012e63770e => Harvest,0],56:[E11N13 => Transfer 1,0],55:[E11N13 => Transfer 0,0],32:[E11N14 => Repair,1],37:[5bbcad8e9099fc012e63770a => Harvest,0] ...
+[11:44:53 PM][shard3][79899692] 📝  开始运行监视, 监视列表当前大小为 28 ...
+[11:44:53 PM][shard3][79899692] 🐛  当前 E11N13 内剩余需要生产的 Creep 数量为 11.
+[11:44:53 PM][shard3][79899692] 🐛  当前 E11N14 内剩余需要生产的 Creep 数量为 2.
+[11:44:53 PM][shard3][79899692] 🐛  当前 E11N17 内剩余需要生产的 Creep 数量为 0.
+[11:44:53 PM][shard3][79899692] ⌛  监视消耗 0.09
+[11:44:53 PM][shard3][79899692] 📝  开始运行进程, 进程池当前大小为 8 ...
+[11:44:53 PM][shard3][79899692] 📝  运行🔄 进程 [⏲️ 定时器](0) ...
+[11:44:53 PM][shard3][79899692] 📝  ⏲️ 定时器内函数数量为 6 ...
+[11:44:53 PM][shard3][79899692] ⌛  ⏲️ 定时器内任务 [追踪记录每个管辖房间, 每个型号的 Creep 数量] 消耗 0.02
+[11:44:53 PM][shard3][79899692] ⌛  ⏲️ 定时器内任务 [可视化房间自动规划布局 E11N13] 消耗 0.00
+[11:44:53 PM][shard3][79899692] ⌛  ⏲️ 定时器内任务 [可视化房间自动规划布局 E11N14] 消耗 0.00
+[11:44:53 PM][shard3][79899692] 📝  [structure (container) #69f4584b5cff7167d8f7e6eb]: 2000 / 0
+[11:44:53 PM][shard3][79899692] ⌛  ⏲️ 定时器内任务 [输出 [Container 69f4584b5cff7167d8f7e6eb] 资源状态] 消耗 0.01
+[11:44:53 PM][shard3][79899692] 📝  [structure (container) #69f54b154315130ab37bd999]: 2000 / 0
+[11:44:53 PM][shard3][79899692] ⌛  ⏲️ 定时器内任务 [输出 [Container 69f54b154315130ab37bd999] 资源状态] 消耗 0.00
+[11:44:53 PM][shard3][79899692] ⌛  ⏲️ 定时器内任务 ['after' build 事件后进程唤醒] 消耗 0.00
+[11:44:53 PM][shard3][79899692] ⌛  🔄 进程 [⏲️ 定时器] 消耗 0.05, 停止在 0.
+[11:44:53 PM][shard3][79899692] 📝  运行🔄 进程 [E11N13 => Tower](1) ...
+[11:44:53 PM][shard3][79899692] ⌛  🔄 进程 [E11N13 => Tower] 消耗 0.07, 停止在 1.
+[11:44:53 PM][shard3][79899692] 📝  运行🔄 进程 [E11N14 => Build](3) ...
+[11:44:53 PM][shard3][79899692] ⌛  🔄 进程 [E11N14 => Build] 消耗 0.24, 停止在 3.
+[11:44:53 PM][shard3][79899692] 📝  运行🔄 进程 [5bbcad8e9099fc012e63770b => Harvest](1) ...
+[11:44:53 PM][shard3][79899692] ⌛  🔄 进程 [5bbcad8e9099fc012e63770b => Harvest] 消耗 0.23, 停止在 1.
+[11:44:53 PM][shard3][79899692] 📝  运行🔄 进程 [E11N14 => Upgrade (always on)](2) ...
+[11:44:53 PM][shard3][79899692] ⌛  🔄 进程 [E11N14 => Upgrade (always on)] 消耗 0.39, 停止在 2.
+[11:44:53 PM][shard3][79899692] 📝  运行🔄 进程 [E11N13 => Build](3) ...
+[11:44:53 PM][shard3][79899692] ⌛  🔄 进程 [E11N13 => Build] 消耗 0.27, 停止在 3.
+[11:44:53 PM][shard3][79899692] 📝  运行🔄 进程 [E11N14 => Fill](1) ...
+[11:44:53 PM][shard3][79899692] ⌛  🔄 进程 [E11N14 => Fill] 消耗 0.24, 停止在 1.
+[11:44:53 PM][shard3][79899692] 📝  运行🔄 进程 [E11N14 => Spawn](0) ...
+[11:44:53 PM][shard3][79899692] 🐛  E11N14 当前优先级为 2 的等待生产 Creep 的数量为 2
+[11:44:53 PM][shard3][79899692] ⌛  🔄 进程 [E11N14 => Spawn] 消耗 0.03, 停止在 0.
+[11:44:53 PM][shard3][79899692] 🐛  休眠进程池: 34:[E11N14 => Energy Store,0],49:[E11N14 Fast Upgrade Build [container, [room E11N14 pos 11,23]],0],50:[E11N14 Fast Upgrade's Container,0],51:[E11N14 Fast Upgrade's Upgrader 0,0],52:[E11N14 Fast Upgrade's Upgrader 1,0],3:[E11N17 => Spawn,0],54:[清理 E11N13 被摧毁的建筑,0],57:[清理 E11N14 被摧毁的建筑,0],1:[E11N13 => Spawn,0],4:[准备 Claim Room 进程,0],11:[E11N13 => CentralTransfer 建筑注册注销,0],60:[清理 E11N17 被摧毁的建筑,0],18:[E11N13 => Quick Filling (Left),0],19:[E11N13 => Quick Filling (Right),0],6:[E11N13 => Fill,0],33:[E11N14 => Paint,0] ...
+[11:44:53 PM][shard3][79899692] 🐛  阻塞进程池: 12:[E11N13 => CentralTransfer,1],15:[E11N13 => Link Filling,0],28:[E11N13 => Link 管理,0],29:[E11N14 => Tower,0],35:[E11N14 => CentralTransfer 建筑注册注销,0],36:[E11N14 => CentralTransfer,0],39:[E11N14 => Link Filling,0],40:[E11N14 => Container Filling (Left),0],41:[E11N14 => Container Filling (Right),0],42:[E11N14 => Quick Filling (Left),0],43:[E11N14 => Quick Filling (Right),0],44:[E11N14 => Quick Filler (Left Top),0],45:[E11N14 => Quick Filler (Left Bottom),0],46:[E11N14 => Quick Filler (Right Top),0],47:[E11N14 => Quick Filler (Right Bottom),0],53:[E11N14 => Link 管理,0],21:[E11N13 => Quick Filler (Left Bottom),4],20:[E11N13 => Quick Filler (Left Top),4],22:[E11N13 => Quick Filler (Right Top),4],23:[E11N13 => Quick Filler (Right Bottom),4],16:[E11N13 => Container Filling (Left),3],17:[E11N13 => Container Filling (Right),3],24:[E11N13 => Upgrade (always on),0],9:[E11N13 => Paint,1],26:[E11N13 Fast Upgrade's Upgrader 0,2],25:[E11N13 Fast Upgrade's Container,1],27:[E11N13 Fast Upgrade's Upgrader 1,2],10:[E11N13 => Energy Store,0],58:[E11N13 => E11N17 Upgrade,1],59:[E11N13 => E11N17 Build,2],14:[5bbcad8e9099fc012e63770f => Harvest,0],8:[E11N13 => Repair,1],13:[5bbcad8e9099fc012e63770e => Harvest,0],56:[E11N13 => Transfer 1,0],55:[E11N13 => Transfer 0,0],32:[E11N14 => Repair,1],37:[5bbcad8e9099fc012e63770a => Harvest,0] ...
+[11:44:58 PM][shard3][79899693] 📝  开始运行监视, 监视列表当前大小为 28 ...
+[11:44:58 PM][shard3][79899693] 🐛  当前 E11N13 内剩余需要生产的 Creep 数量为 11.
+[11:44:58 PM][shard3][79899693] 🐛  当前 E11N14 内剩余需要生产的 Creep 数量为 2.
+[11:44:58 PM][shard3][79899693] 🐛  当前 E11N17 内剩余需要生产的 Creep 数量为 0.
+[11:44:58 PM][shard3][79899693] ⌛  监视消耗 0.09
+[11:44:58 PM][shard3][79899693] 📝  开始运行进程, 进程池当前大小为 8 ...
+[11:44:58 PM][shard3][79899693] 📝  运行🔄 进程 [⏲️ 定时器](0) ...
+[11:44:58 PM][shard3][79899693] 📝  ⏲️ 定时器内函数数量为 6 ...
+[11:44:58 PM][shard3][79899693] ⌛  ⏲️ 定时器内任务 [追踪记录每个管辖房间, 每个型号的 Creep 数量] 消耗 0.02
+[11:44:58 PM][shard3][79899693] ⌛  ⏲️ 定时器内任务 [可视化房间自动规划布局 E11N13] 消耗 0.00
+[11:44:58 PM][shard3][79899693] ⌛  ⏲️ 定时器内任务 [可视化房间自动规划布局 E11N14] 消耗 0.00
+[11:44:58 PM][shard3][79899693] 📝  [structure (container) #69f4584b5cff7167d8f7e6eb]: 2000 / 0
+[11:44:58 PM][shard3][79899693] ⌛  ⏲️ 定时器内任务 [输出 [Container 69f4584b5cff7167d8f7e6eb] 资源状态] 消耗 0.01
+[11:44:58 PM][shard3][79899693] 📝  [structure (container) #69f54b154315130ab37bd999]: 2000 / 0
+[11:44:58 PM][shard3][79899693] ⌛  ⏲️ 定时器内任务 [输出 [Container 69f54b154315130ab37bd999] 资源状态] 消耗 0.00
+[11:44:58 PM][shard3][79899693] ⌛  ⏲️ 定时器内任务 ['after' build 事件后进程唤醒] 消耗 0.00
+[11:44:58 PM][shard3][79899693] ⌛  🔄 进程 [⏲️ 定时器] 消耗 0.05, 停止在 0.
+[11:44:58 PM][shard3][79899693] 📝  运行🔄 进程 [E11N13 => Tower](1) ...
+[11:44:58 PM][shard3][79899693] ⌛  🔄 进程 [E11N13 => Tower] 消耗 0.07, 停止在 1.
+[11:44:58 PM][shard3][79899693] 📝  运行🔄 进程 [E11N14 => Build](3) ...
+[11:44:58 PM][shard3]Script execution timed out: CPU time limit reached
+    at get (<runtime>:28445:16)
+    at buildConstructionSite (main:9387:25)
+[11:45:07 PM][shard3][79899699] 📝  开始运行监视, 监视列表当前大小为 28 ...
+[11:45:07 PM][shard3][79899699] 🐛  当前 E11N13 内剩余需要生产的 Creep 数量为 11.
+[11:45:07 PM][shard3][79899699] 🐛  当前 E11N14 内剩余需要生产的 Creep 数量为 2.
+[11:45:07 PM][shard3][79899699] 🐛  当前 E11N17 内剩余需要生产的 Creep 数量为 0.
+[11:45:07 PM][shard3][79899699] ⌛  监视消耗 0.09
+[11:45:07 PM][shard3][79899699] 📝  开始运行进程, 进程池当前大小为 5 ...
+[11:45:07 PM][shard3][79899699] 📝  运行🔄 进程 [5bbcad8e9099fc012e63770b => Harvest](1) ...
+[11:45:07 PM][shard3][79899699] ⌛  🔄 进程 [5bbcad8e9099fc012e63770b => Harvest] 消耗 0.23, 停止在 1.
+[11:45:07 PM][shard3][79899699] 📝  运行🔄 进程 [E11N14 => Upgrade (always on)](2) ...
+[11:45:07 PM][shard3][79899699] ⌛  🔄 进程 [E11N14 => Upgrade (always on)] 消耗 0.02, 停止在 2.
+[11:45:07 PM][shard3][79899699] 📝  运行🔄 进程 [E11N13 => Build](3) ...
+[11:45:07 PM][shard3][79899699] ⌛  🔄 进程 [E11N13 => Build] 消耗 0.28, 停止在 3.
+[11:45:07 PM][shard3][79899699] 📝  运行🔄 进程 [E11N14 => Fill](1) ...
+[11:45:07 PM][shard3][79899699] ⌛  🔄 进程 [E11N14 => Fill] 消耗 0.25, 停止在 1.
+[11:45:07 PM][shard3][79899699] 📝  运行🔄 进程 [E11N14 => Spawn](0) ...
+[11:45:07 PM][shard3][79899699] 🐛  E11N14 当前优先级为 2 的等待生产 Creep 的数量为 2
+[11:45:07 PM][shard3][79899699] ⌛  🔄 进程 [E11N14 => Spawn] 消耗 0.03, 停止在 0.
+[11:45:07 PM][shard3][79899699] 🐛  休眠进程池: 34:[E11N14 => Energy Store,0],49:[E11N14 Fast Upgrade Build [container, [room E11N14 pos 11,23]],0],50:[E11N14 Fast Upgrade's Container,0],51:[E11N14 Fast Upgrade's Upgrader 0,0],52:[E11N14 Fast Upgrade's Upgrader 1,0],3:[E11N17 => Spawn,0],54:[清理 E11N13 被摧毁的建筑,0],57:[清理 E11N14 被摧毁的建筑,0],1:[E11N13 => Spawn,0],4:[准备 Claim Room 进程,0],11:[E11N13 => CentralTransfer 建筑注册注销,0],60:[清理 E11N17 被摧毁的建筑,0],18:[E11N13 => Quick Filling (Left),0],19:[E11N13 => Quick Filling (Right),0],6:[E11N13 => Fill,0],33:[E11N14 => Paint,0] ...
+[11:45:07 PM][shard3][79899699] 🐛  阻塞进程池: 12:[E11N13 => CentralTransfer,1],15:[E11N13 => Link Filling,0],28:[E11N13 => Link 管理,0],29:[E11N14 => Tower,0],35:[E11N14 => CentralTransfer 建筑注册注销,0],36:[E11N14 => CentralTransfer,0],39:[E11N14 => Link Filling,0],40:[E11N14 => Container Filling (Left),0],41:[E11N14 => Container Filling (Right),0],42:[E11N14 => Quick Filling (Left),0],43:[E11N14 => Quick Filling (Right),0],44:[E11N14 => Quick Filler (Left Top),0],45:[E11N14 => Quick Filler (Left Bottom),0],46:[E11N14 => Quick Filler (Right Top),0],47:[E11N14 => Quick Filler (Right Bottom),0],53:[E11N14 => Link 管理,0],21:[E11N13 => Quick Filler (Left Bottom),4],20:[E11N13 => Quick Filler (Left Top),4],22:[E11N13 => Quick Filler (Right Top),4],23:[E11N13 => Quick Filler (Right Bottom),4],16:[E11N13 => Container Filling (Left),3],17:[E11N13 => Container Filling (Right),3],24:[E11N13 => Upgrade (always on),0],9:[E11N13 => Paint,1],26:[E11N13 Fast Upgrade's Upgrader 0,2],25:[E11N13 Fast Upgrade's Container,1],27:[E11N13 Fast Upgrade's Upgrader 1,2],10:[E11N13 => Energy Store,0],58:[E11N13 => E11N17 Upgrade,1],59:[E11N13 => E11N17 Build,2],14:[5bbcad8e9099fc012e63770f => Harvest,0],8:[E11N13 => Repair,1],13:[5bbcad8e9099fc012e63770e => Harvest,0],56:[E11N13 => Transfer 1,0],55:[E11N13 => Transfer 0,0],32:[E11N14 => Repair,1],37:[5bbcad8e9099fc012e63770a => Harvest,0] ...
+[11:45:11 PM][shard3][79899700] 📝  开始运行监视, 监视列表当前大小为 28 ...
+[11:45:11 PM][shard3][79899700] 🐛  当前 E11N13 内剩余需要生产的 Creep 数量为 11.
+[11:45:11 PM][shard3][79899700] 🐛  当前 E11N14 内剩余需要生产的 Creep 数量为 2.
+[11:45:11 PM][shard3][79899700] 🐛  当前 E11N17 内剩余需要生产的 Creep 数量为 0.
+[11:45:11 PM][shard3][79899700] ⌛  监视消耗 0.11
+[11:45:11 PM][shard3][79899700] 📝  开始运行进程, 进程池当前大小为 5 ...
+[11:45:11 PM][shard3][79899700] 📝  运行🔄 进程 [5bbcad8e9099fc012e63770b => Harvest](1) ...
+[11:45:11 PM][shard3][79899700] ⌛  🔄 进程 [5bbcad8e9099fc012e63770b => Harvest] 消耗 0.24, 停止在 1.
+[11:45:11 PM][shard3][79899700] 📝  运行🔄 进程 [E11N14 => Upgrade (always on)](2) ...
+[11:45:11 PM][shard3][79899700] ⌛  🔄 进程 [E11N14 => Upgrade (always on)] 消耗 0.24, 停止在 2.
+[11:45:11 PM][shard3][79899700] 📝  运行🔄 进程 [E11N13 => Build](3) ...
+[11:45:11 PM][shard3][79899700] ⌛  🔄 进程 [E11N13 => Build] 消耗 0.34, 停止在 3.
+[11:45:11 PM][shard3][79899700] 📝  运行🔄 进程 [E11N14 => Fill](1) ...
+[11:45:11 PM][shard3][79899700] ⌛  🔄 进程 [E11N14 => Fill] 消耗 0.34, 停止在 1.
+[11:45:11 PM][shard3][79899700] 📝  运行🔄 进程 [E11N14 => Spawn](0) ...
+[11:45:11 PM][shard3][79899700] 🐛  E11N14 当前优先级为 2 的等待生产 Creep 的数量为 2
+[11:45:11 PM][shard3][79899700] ⌛  🔄 进程 [E11N14 => Spawn] 消耗 0.05, 停止在 0.
+[11:45:11 PM][shard3][79899700] 🐛  休眠进程池: 34:[E11N14 => Energy Store,0],49:[E11N14 Fast Upgrade Build [container, [room E11N14 pos 11,23]],0],50:[E11N14 Fast Upgrade's Container,0],51:[E11N14 Fast Upgrade's Upgrader 0,0],52:[E11N14 Fast Upgrade's Upgrader 1,0],3:[E11N17 => Spawn,0],54:[清理 E11N13 被摧毁的建筑,0],57:[清理 E11N14 被摧毁的建筑,0],1:[E11N13 => Spawn,0],4:[准备 Claim Room 进程,0],11:[E11N13 => CentralTransfer 建筑注册注销,0],60:[清理 E11N17 被摧毁的建筑,0],18:[E11N13 => Quick Filling (Left),0],19:[E11N13 => Quick Filling (Right),0],6:[E11N13 => Fill,0],33:[E11N14 => Paint,0] ...
+[11:45:11 PM][shard3][79899700] 🐛  阻塞进程池: 12:[E11N13 => CentralTransfer,1],15:[E11N13 => Link Filling,0],28:[E11N13 => Link 管理,0],29:[E11N14 => Tower,0],35:[E11N14 => CentralTransfer 建筑注册注销,0],36:[E11N14 => CentralTransfer,0],39:[E11N14 => Link Filling,0],40:[E11N14 => Container Filling (Left),0],41:[E11N14 => Container Filling (Right),0],42:[E11N14 => Quick Filling (Left),0],43:[E11N14 => Quick Filling (Right),0],44:[E11N14 => Quick Filler (Left Top),0],45:[E11N14 => Quick Filler (Left Bottom),0],46:[E11N14 => Quick Filler (Right Top),0],47:[E11N14 => Quick Filler (Right Bottom),0],53:[E11N14 => Link 管理,0],21:[E11N13 => Quick Filler (Left Bottom),4],20:[E11N13 => Quick Filler (Left Top),4],22:[E11N13 => Quick Filler (Right Top),4],23:[E11N13 => Quick Filler (Right Bottom),4],16:[E11N13 => Container Filling (Left),3],17:[E11N13 => Container Filling (Right),3],24:[E11N13 => Upgrade (always on),0],9:[E11N13 => Paint,1],26:[E11N13 Fast Upgrade's Upgrader 0,2],25:[E11N13 Fast Upgrade's Container,1],27:[E11N13 Fast Upgrade's Upgrader 1,2],10:[E11N13 => Energy Store,0],58:[E11N13 => E11N17 Upgrade,1],59:[E11N13 => E11N17 Build,2],14:[5bbcad8e9099fc012e63770f => Harvest,0],8:[E11N13 => Repair,1],13:[5bbcad8e9099fc012e63770e => Harvest,0],56:[E11N13 => Transfer 1,0],55:[E11N13 => Transfer 0,0],32:[E11N14 => Repair,1],37:[5bbcad8e9099fc012e63770a => Harvest,0] ...
+
+ 
+[11:46:57 PM][shard3]Debug fill
+[11:46:57 PM][shard3]Debug fill 0
+[11:46:57 PM][shard3]Debug fill 1
+[11:46:57 PM][shard3]Debug fill 2
+[11:46:57 PM][shard3]Debug fill 3
+[11:46:57 PM][shard3]Debug fill
+[11:46:57 PM][shard3]Debug fill 0
+[11:46:57 PM][shard3]Debug fill 1
+[11:46:57 PM][shard3]Debug fill 2
+[11:46:57 PM][shard3]Debug fill 3
+[11:46:57 PM][shard3]Debug fill
+[11:46:57 PM][shard3]Debug fill 0
+[11:46:57 PM][shard3]Debug fill 1
+[11:46:57 PM][shard3]Debug fill 2
+[11:46:57 PM][shard3]Debug fill 3
+[11:46:57 PM][shard3]Debug fill
+[11:46:57 PM][shard3]Debug fill 0
+[11:46:57 PM][shard3]Debug fill 1
+[11:46:57 PM][shard3]Debug fill 2
+[11:46:57 PM][shard3]Debug fill 3
+[11:46:57 PM][shard3]Debug fill
+[11:46:57 PM][shard3]Debug fill 0
+[11:46:57 PM][shard3]Debug fill 1
+[11:46:57 PM][shard3]Debug fill 2
+[11:46:57 PM][shard3]Debug fill 3
+[11:46:57 PM][shard3]Debug fill
+[11:46:57 PM][shard3]Debug fill 0
+[11:46:57 PM][shard3]Debug fill 1
+[11:46:57 PM][shard3]Debug fill 2
+[11:46:57 PM][shard3]Debug fill 3
+[11:46:57 PM][shard3]Debug fill
+[11:46:57 PM][shard3]Debug fill 0
+[11:46:57 PM][shard3]Debug fill 1
+[11:46:57 PM][shard3][79899716] 📝  开始运行监视, 监视列表当前大小为 28 ...
+[11:46:57 PM][shard3][79899716] 🐛  当前 E11N13 内剩余需要生产的 Creep 数量为 11.
+[11:46:57 PM][shard3][79899716] 🐛  当前 E11N14 内剩余需要生产的 Creep 数量为 3.
+[11:46:57 PM][shard3][79899716] 🐛  当前 E11N17 内剩余需要生产的 Creep 数量为 0.

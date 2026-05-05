@@ -46,7 +46,7 @@ function issueClaimRoomProc(srcRoomName: string, tarRoomName: string, getIssuedF
 
     function gotoRoom(getName: () => string, setName: (name: string) => void) {
         const creep = Game.creeps[getName()]
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(getName())
             setName(null)
             return [A.proc.STOP_ERR, `Creep [${getName()}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -64,7 +64,7 @@ function issueClaimRoomProc(srcRoomName: string, tarRoomName: string, getIssuedF
 
     function claimRoom(name: string) {
         const creep = Game.creeps[name]
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(name)
             claimerName = null
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -108,7 +108,7 @@ function issueClaimRoomProc(srcRoomName: string, tarRoomName: string, getIssuedF
         return function() {
             const name = getName()
             const creep = Game.creeps[name]
-            if ( !creep ) {
+            if ( !creep || creep.hits < creep.hitsMax ) {
                 C.cancel(name)
                 setName(null)
                 return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -148,7 +148,7 @@ function issueClaimRoomProc(srcRoomName: string, tarRoomName: string, getIssuedF
 
     function upgradeRoom(name: string) {
         const creep = Game.creeps[name]
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(name)
             upgraderName = null
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -206,7 +206,7 @@ function issueClaimRoomProc(srcRoomName: string, tarRoomName: string, getIssuedF
 
     function buildRoom(name: string) {
         const creep = Game.creeps[name]
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(name)
             builderName = null
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]

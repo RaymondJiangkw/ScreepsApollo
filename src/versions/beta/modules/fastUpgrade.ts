@@ -55,7 +55,7 @@ function getEnergy(roomName: string, getWorkerName: () => string, setWorkerName:
         const name = getWorkerName()
         const creep = Game.creeps[name]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(name)
             setWorkerName(null)
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -118,7 +118,7 @@ function issueUpgradeProc(roomName: string) {
     function gotoController(name: string) {
         const creep = Game.creeps[name]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(name)
             workerName = null
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -142,7 +142,7 @@ function issueUpgradeProc(roomName: string) {
     function upgradeController(name: string) {
         const creep = Game.creeps[name]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(name)
             workerName = null
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -206,7 +206,7 @@ function issueFastUpgradesBuildProc(roomName: string, controllerId: Id<Structure
     function buildConstructionSite(name: string) {
         const creep = Game.creeps[name]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(name)
             workerName = null
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -297,7 +297,7 @@ function issueFastUpgradeProc(roomName: string, controllerId: Id<StructureContro
         const transferAmount = Math.min(amount, capacity)
         assertWithMsg( A.res.request({ id: container.id, resourceType: A.res.CAPACITY, amount: transferAmount }) === A.proc.OK, getFileNameAndLineNumber() )
         assertWithMsg( A.res.request({ id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: transferAmount }) === A.proc.OK, getFileNameAndLineNumber() )
-        T.transfer(requestedSource.id, container.id, RESOURCE_ENERGY, transferAmount)
+        T.transfer(requestedSource.id, container.id, RESOURCE_ENERGY, transferAmount, { allowLooseGrouping: true })
         return A.proc.OK_STOP_CURRENT
     }
 
@@ -333,7 +333,7 @@ function issueFastUpgradeProc(roomName: string, controllerId: Id<StructureContro
                     if ( A.proc.signal.getValue(buildContainerCompleteSignal) === 1 ) A.proc.signal.Swait({ signalId: buildContainerCompleteSignal, lowerbound: 1, request: 1 })
                     const name = upgraderNames[upgraderIdx]
                     const creep = Game.creeps[name]
-                    if ( !creep ) C.cancel(name)
+                    if ( !creep || creep.hits < creep.hitsMax ) C.cancel(name)
                     else C.release(name)
                     upgraderNames[upgraderIdx] = null
                     return A.proc.STOP_SLEEP
@@ -342,7 +342,7 @@ function issueFastUpgradeProc(roomName: string, controllerId: Id<StructureContro
                 const name = upgraderNames[upgraderIdx]
                 const creep = Game.creeps[name]
                 /** 检测到错误, 立即释放资源 */
-                if ( !creep ) {
+                if ( !creep || creep.hits < creep.hitsMax ) {
                     C.cancel(name)
                     upgraderNames[upgraderIdx] = null
                     return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -373,8 +373,8 @@ function issueFastUpgradeProc(roomName: string, controllerId: Id<StructureContro
                             if ( amount <= 0 ) return A.res.request({ id: container.id, resourceType: RESOURCE_ENERGY, amount: { lowerbound: CARRY_CAPACITY, request: 0 } })
                             const withdrawAmount = Math.min(amount, creep.store.getFreeCapacity())
                             assertWithMsg( A.res.request({ id: container.id, resourceType: RESOURCE_ENERGY, amount: withdrawAmount }) === A.proc.OK, getFileNameAndLineNumber() )
-                            A.timer.add(Game.time + 1, (id, a) => A.res.signal(id, A.res.CAPACITY, a), [container.id, withdrawAmount], `${container.id} 资源更新`)
                             assertWithMsg( creep.withdraw(container, RESOURCE_ENERGY, withdrawAmount) === OK, getFileNameAndLineNumber() )
+                            A.timer.add(Game.time + 1, () => A.res.signal(info()[STRUCTURE_CONTAINER].id, A.res.CAPACITY, withdrawAmount), [], `${container.id} 资源更新`)
                         }
                         return A.proc.OK_STOP_CURRENT
                     }
@@ -401,10 +401,10 @@ export function issueFastUpgrade( roomName: string ): (() => Id<StructureLink>)[
     assertWithMsg( room && room.controller && room.controller.my, `无法为非自己控制的房间创建 Upgrade 方法` )
     const sources = Game.rooms[roomName].find(FIND_SOURCES) // 根据 Source 数量决定最快升级数量
     issueUpgradeProc(roomName)
-    // if ( controllerUnit.isControllerFit(room.controller.id) ) {
-    //     issueFastUpgradeProc(roomName, room.controller.id, room.controller.pos, sources.length)
-    // } else {
-    //     log(LOG_ERR, `无法为 ${roomName} 创建迅速升级方法`)
-    // }
+    if ( controllerUnit.isControllerFit(room.controller.id) ) {
+        issueFastUpgradeProc(roomName, room.controller.id, room.controller.pos, sources.length)
+    } else {
+        log(LOG_ERR, `无法为 ${roomName} 创建迅速升级方法`)
+    }
     return []
 }

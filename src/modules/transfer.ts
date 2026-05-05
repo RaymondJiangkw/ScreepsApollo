@@ -79,7 +79,7 @@ class TransferModule {
                     () => C.acquire('transferer', roomName, name => workerName = name), 
                     () => {
                         const creep = Game.creeps[workerName]
-                        if ( !creep ) {
+                        if ( !creep || creep.hits < creep.hitsMax ) {
                             C.cancel(workerName)
                             workerName = null
 
@@ -104,7 +104,7 @@ class TransferModule {
                     [ 'moveToSource', () => {
                         const creep = Game.creeps[workerName]
                         /** 检测到错误, 立即释放资源 */
-                        if ( !creep ) {
+                        if ( !creep || creep.hits < creep.hitsMax ) {
                             // 释放 Creep
                             C.cancel(workerName)
                             workerName = null
@@ -154,7 +154,7 @@ class TransferModule {
                     [ 'withdraw', () => {
                         const creep = Game.creeps[workerName]
                         /** 检测到错误, 立即释放资源 */
-                        if ( !creep ) {
+                        if ( !creep || creep.hits < creep.hitsMax ) {
                             // || creep.ticksToLive < 3
                             // if ( creep ) creep.suicide()
                             // 释放 Creep
@@ -244,7 +244,7 @@ class TransferModule {
                     ['moveToTarget', () => {
                         const creep = Game.creeps[workerName]
                         /** 检测到错误, 立即释放资源 */
-                        if ( !creep ) {
+                        if ( !creep || creep.hits < creep.hitsMax ) {
                             // || creep.ticksToLive < 3
                             // if ( creep ) creep.suicide()
                             // 释放 Creep
@@ -315,7 +315,7 @@ class TransferModule {
 
                         const resourceType = Object.keys(targetDict)[0] as ResourceConstant
                         const amount = targetDict[resourceType]
-                        assertWithMsg( amount <= creep.store[resourceType] && amount <= target.store.getFreeCapacity(resourceType), `transfer -> 242 ${amount}}` )
+                        assertWithMsg( amount <= creep.store[resourceType] && amount <= target.store.getFreeCapacity(resourceType), `transfer -> 242 ${amount}` )
                         assertWithMsg( creep.transfer(target, resourceType, amount) === OK )
                         A.timer.add(Game.time + 1, (targetId, resourceType, amount) => A.res.signal(targetId, resourceType, amount), [target.id, resourceType, amount], `转移资源后, 更新目标建筑相应资源的数量`)
                         delete targetDict[resourceType]

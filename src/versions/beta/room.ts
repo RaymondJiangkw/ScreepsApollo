@@ -18,7 +18,7 @@ function getEnergy(roomName: string, getWorkerName: () => string, setWorkerName:
         const name = getWorkerName()
         const creep = Game.creeps[name]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(name)
             setWorkerName(null)
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -81,7 +81,7 @@ function issueFillProc(roomName: string) {
     function gotoSpawn(name: string) {
         const creep = Game.creeps[name]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(name)
             workerName = null
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -120,13 +120,21 @@ function issueFillProc(roomName: string) {
     const gotoSource = getEnergy(roomName, () => workerName, name => workerName = name)
 
     const pid = A.proc.createProc([
+        () => {
+            if ( !!Game.rooms[roomName] && Game.rooms[roomName].energyAvailable < Game.rooms[roomName].energyCapacityAvailable ) return A.proc.OK
+            else return A.proc.STOP_SLEEP
+        }, 
         () => C.acquire('worker', roomName, name => workerName = name), 
         [ 'gotoSource', gotoSource ], 
         () => gotoSpawn(workerName), 
         [ 'JUMP', () => true, 'gotoSource' ]
-    ], `${roomName} => Fill`, true)
+    ], `${roomName} => Fill`)
 
-    A.proc.trigger('watch', () => typeof Game.rooms[roomName].energyAvailable !== "number"? false : (Game.rooms[roomName].energyAvailable < Game.rooms[roomName].energyCapacityAvailable), [ pid ])
+    A.proc.trigger('after', Spawn.prototype, 'spawnCreep', (returnValue, spawn: StructureSpawn, ...args) => {
+        if ( returnValue === OK && spawn.pos.roomName === roomName )
+            return [ pid ]
+        return []
+    })
 }
 
 function issueBuildProc(roomName: string) {
@@ -159,7 +167,7 @@ function issueBuildProc(roomName: string) {
     function buildConstructionSite(name: string) {
         const creep = Game.creeps[name]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(name)
             workerName = null
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -254,7 +262,7 @@ function issueRepairProc(roomName: string) {
     function gotoStructure(name: string) {
         const creep = Game.creeps[name]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(name)
             workerName = null
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -292,8 +300,19 @@ function issueRepairProc(roomName: string) {
     const pid = A.proc.createProc([
         ['getRepairedPos', () => getRepairedPos()], 
         () => C.acquire('worker', roomName, name => workerName = name), 
+        () => {
+            const creep = Game.creeps[workerName]
+            /** 检测到错误, 立即释放资源 */
+            if ( !creep || creep.hits < creep.hitsMax ) {
+                C.cancel(workerName)
+                workerName = null
+                return [A.proc.STOP_ERR, `Creep [${workerName}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
+            }
+            if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) > 0 ) return [ A.proc.OK_STOP_CUSTOM, 'work' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+            else return A.proc.OK
+        }, 
         [ 'gotoSource', gotoSource ], 
-        () => gotoStructure(workerName), 
+        [ 'work', () => gotoStructure(workerName) ], 
         [ 'JUMP', () => true, 'getRepairedPos' ]
     ], `${roomName} => Repair`)
 
@@ -324,7 +343,7 @@ function issuePaintProc(roomName: string) {
     function gotoStructure(name: string) {
         const creep = Game.creeps[name]
         /** 检测到错误, 立即释放资源 */
-        if ( !creep ) {
+        if ( !creep || creep.hits < creep.hitsMax ) {
             C.cancel(name)
             workerName = null
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
@@ -362,8 +381,19 @@ function issuePaintProc(roomName: string) {
     const pid = A.proc.createProc([
         ['getRepairedPos', () => getRepairedPos()], 
         () => C.acquire('painter', roomName, name => workerName = name), 
+        () => {
+            const creep = Game.creeps[workerName]
+            /** 检测到错误, 立即释放资源 */
+            if ( !creep || creep.hits < creep.hitsMax ) {
+                C.cancel(workerName)
+                workerName = null
+                return [A.proc.STOP_ERR, `Creep [${workerName}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
+            }
+            if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) > 0 ) return [ A.proc.OK_STOP_CUSTOM, 'work' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+            else return A.proc.OK
+        }, 
         [ 'gotoSource', gotoSource ], 
-        () => gotoStructure(workerName), 
+        [ 'work', () => gotoStructure(workerName) ], 
         [ 'JUMP', () => true, 'getRepairedPos' ]
     ], `${roomName} => Paint`)
 
@@ -418,11 +448,11 @@ export function issueForRoom(roomName: string) {
     /** 资源状态输出 */
     // A.timer.add(Game.time + 1, roomName => A.res.print(roomName), [roomName], `输出房间 ${roomName} 资源状态`, 1)
 
+    issueDefendProc(roomName)
     issueFillProc(roomName)
     issueBuildProc(roomName)
     issueRepairProc(roomName)
     issuePaintProc(roomName)
-    issueDefendProc(roomName)
 
     /** Central Transfer 模块 */
     const transitLink = issueCentralTransfer(roomName)

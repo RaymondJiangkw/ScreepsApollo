@@ -52,7 +52,7 @@ function issueRoomTowerDefend(roomName: string) {
             const hostileCreeps = Game.rooms[roomName].find(FIND_HOSTILE_CREEPS)
             if ( hostileCreeps.length > 0 ) {
                 const hostileCreepsDesc = hostileCreeps.map(creep => {
-                    return {creep, hasHeal: _.filter(creep.body, desc => desc.type === HEAL && desc.hits > 0).length > 0, hasAttack: _.filter(creep.body, desc => (desc.type === ATTACK || desc.type === RANGED_ATTACK) && desc.hits > 0).length > 0, range: towers[0].pos.getRangeTo(creep) }
+                    return {creep, hasHeal: _.filter(creep.body, desc => desc.type === HEAL && desc.hits > 0).length > 0, hasAttack: _.filter(creep.body, desc => (desc.type === ATTACK || desc.type === RANGED_ATTACK) && desc.hits > 0).length > 0, range: towers.length > 0 ? towers[0].pos.getRangeTo(creep) : 0 }
                 })
 
                 const creepsWithHeal = hostileCreepsDesc.filter(({ hasHeal }) => hasHeal)
