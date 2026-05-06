@@ -1051,6 +1051,8 @@ class PlanModule {
                             // 更新相关信号量
                             for ( const t of info.tag )
                                 this.#updateUnitTagSignal(this.#getRoom2UnitTagSignal(info.pos.roomName, info.unitName, t), info.pos.roomName, info.unitName, t)
+                            // 注册建筑 Store
+                            if ( !!(structure as StorableStructure).store && !(structure instanceof StructureSpawn) && !(structure instanceof StructureExtension) ) A.res.register(structure as StorableStructure)
                         }
                     }, [ target.pos ], `注册即将完成的建筑 ${target.id} (${target.pos}, ${target.structureType})`)
                 }

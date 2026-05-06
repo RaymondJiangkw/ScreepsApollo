@@ -7,6 +7,7 @@ import { planModule as P } from "@/modules/plan"
 import { creepModule as C } from "@/modules/creep"
 import { transferModule as T } from "@/modules/transfer"
 import { assertWithMsg, calcBodyEffectiveness, getAvailableSurroundingPos, getFileNameAndLineNumber, log, LOG_ERR } from "@/utils"
+import { issueBuildStructureProc } from "./buildStructure"
 
 /** 管理 Controller 附近的建筑 */
 type ControllerRelevantStructures = {
@@ -195,7 +196,6 @@ export function registerFastUpgrade() {
 
 function issueFastUpgradesBuildProc(roomName: string, controllerId: Id<StructureController>, pos: RoomPosition, structureType: StructureConstant) {
     const info = () => controllerUnit.getController2Structure(controllerId)
-    let workerName = null
     const isBuildRequired = !Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, pos).filter(s => s.structureType === structureType)[0]
     const buildCompleteSignal = A.proc.signal.createSignal(!isBuildRequired ? 1 : 0)
     if ( !isBuildRequired ) {
@@ -203,64 +203,7 @@ function issueFastUpgradesBuildProc(roomName: string, controllerId: Id<Structure
         return buildCompleteSignal
     }
 
-    function buildConstructionSite(name: string) {
-        const creep = Game.creeps[name]
-        /** 检测到错误, 立即释放资源 */
-        if ( !creep || creep.hits < creep.hitsMax ) {
-            C.cancel(name)
-            workerName = null
-            return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
-        }
-
-        /** 最后几秒, 撤离 */
-        if ( creep.ticksToLive < 3 ) {
-            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
-                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
-            return A.proc.OK_STOP_CURRENT
-        }
-
-        if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) return [ A.proc.OK_STOP_CUSTOM, 'gotoSource' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
-
-        if ( creep.pos.roomName === roomName && creep.pos.getRangeTo(pos) <= 3 ) {
-            const target = Game.rooms[roomName].lookForAt(LOOK_CONSTRUCTION_SITES, pos)[0]
-            if ( target ) creep.build(target)
-            else {
-                const structure = Game.rooms[roomName].lookForAt(LOOK_STRUCTURES, pos).filter(s => s.structureType === structureType)[0]
-                if ( structure ) {
-                    info()[structureType].id = structure.id
-                    assertWithMsg( A.proc.signal.Ssignal({ signalId: buildCompleteSignal, request: 1 }) === A.proc.OK, getFileNameAndLineNumber() )
-                    return A.proc.STOP_SLEEP
-                } else {
-                    const retCode = Game.rooms[roomName].createConstructionSite(pos, structureType)
-                    if ( retCode === ERR_NOT_IN_RANGE ) creep.travelTo(pos)
-                    else assertWithMsg( retCode === OK, `无法为 Controller 在 ${pos} 构建建筑 ${structureType}` )
-                    return A.proc.OK_STOP_CURRENT
-                }
-            }
-        } else creep.travelTo(pos, { range: 3 })
-
-        return A.proc.OK_STOP_CURRENT
-    }
-
-    const gotoSource = getEnergy(roomName, () => workerName, name => workerName = name)
-
-    const pid = A.proc.createProc([
-        () => {
-            if ( Game.rooms[roomName].controller.level >= 6 ) return A.proc.STOP_SLEEP
-            if ( !info()[structureType].id ) {
-                if ( A.proc.signal.getValue(buildCompleteSignal) === 1 ) A.proc.signal.Swait({ signalId: buildCompleteSignal, lowerbound: 1, request: 1 })
-                return A.proc.OK
-            }
-            if ( !Game.getObjectById(info()[structureType].id) ) {
-                info()[structureType].id = null
-                if ( A.proc.signal.getValue(buildCompleteSignal) === 1 ) A.proc.signal.Swait({ signalId: buildCompleteSignal, lowerbound: 1, request: 1 })
-                return A.proc.OK
-            } else return A.proc.STOP_SLEEP
-        }, 
-        () => C.acquire('worker', roomName, name => workerName = name), 
-        ['gotoSource', gotoSource], 
-        () => buildConstructionSite(workerName)
-    ], `${roomName} Fast Upgrade Build [${structureType}, ${pos}]`, true)
+    const pid = issueBuildStructureProc(roomName, STRUCTURE_CONTAINER, () => info()[STRUCTURE_CONTAINER], buildCompleteSignal)
 
     A.proc.trigger('watch', () => {
         return Game.getObjectById(controllerId) && Game.getObjectById(controllerId).level >= 3 && Game.getObjectById(controllerId).level < 6 && !Game.getObjectById(info()[structureType].id)
@@ -274,6 +217,16 @@ function issueFastUpgradeProc(roomName: string, controllerId: Id<StructureContro
     const buildContainerCompleteSignal = issueFastUpgradesBuildProc(roomName, controllerId, new RoomPosition(info()[STRUCTURE_CONTAINER].pos.x, info()[STRUCTURE_CONTAINER].pos.y, roomName), STRUCTURE_CONTAINER)
 
     function fillContainer() {
+        if ( Game.rooms[roomName].controller.level >= 6 ) {
+            // 销毁 container, 腾位置给矿物采集
+            if ( info()[STRUCTURE_CONTAINER].id ) {
+                if ( Game.getObjectById(info()[STRUCTURE_CONTAINER].id) ) Game.getObjectById(info()[STRUCTURE_CONTAINER].id).destroy()
+                info()[STRUCTURE_CONTAINER].id = null
+            }
+            if ( A.proc.signal.getValue(buildContainerCompleteSignal) === 1 ) A.proc.signal.Swait({ signalId: buildContainerCompleteSignal, lowerbound: 1, request: 1 })
+            return [ A.proc.STOP_ERR, `Container 无法找到` ] as [ typeof A.proc.STOP_ERR, string ]
+        }
+        
         if ( !info()[STRUCTURE_CONTAINER].id || !Game.getObjectById(info()[STRUCTURE_CONTAINER].id) ) {
             info()[STRUCTURE_CONTAINER].id = null
             if ( A.proc.signal.getValue(buildContainerCompleteSignal) === 1 ) A.proc.signal.Swait({ signalId: buildContainerCompleteSignal, lowerbound: 1, request: 1 })

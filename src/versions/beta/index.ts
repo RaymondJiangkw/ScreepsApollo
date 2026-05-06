@@ -10,6 +10,8 @@ import { issueForRoom, registerForRoom } from './room'
 import { registerDefendRoom } from './modules/roomDefense'
 import { registerFastUpgrade } from './modules/fastUpgrade'
 import { registerLinkManage } from './modules/linkManage'
+import { registerHarvestMineral } from './modules/harvestMineral'
+import { registerPaint } from './modules/paintRampart'
 
 /** AI 挂载入口 */
 export function mountAll() {
@@ -25,8 +27,12 @@ export function registerAll() {
     registerCommonConstructions()
     /** 生产规划 */
     registerProduction()
+    /** Paint Rampart 模块 */
+    registerPaint()
     /** Source Harvest 模块 */
     registerHarvestSource()
+    /** Mineral Harvest 模块 */
+    registerHarvestMineral()
     /** Quick Energy Filling 模块 */
     registerQuickEnergyFill()
     /** Central Transfer 模块 */

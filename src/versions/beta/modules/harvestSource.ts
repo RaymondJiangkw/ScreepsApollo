@@ -129,6 +129,12 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
             return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
         }
 
+        /** 即将消亡, 则逃离原位置 */
+        if ( creep.ticksToLive < 5 ) {
+            creep.travelTo( Game.getObjectById(sourceId), { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+            return A.proc.OK_STOP_CURRENT
+        }
+
         // 优先判定 Link
         const linkPos = new RoomPosition(info()[STRUCTURE_LINK].pos.x, info()[STRUCTURE_LINK].pos.y, roomName)
         if ( info()[STRUCTURE_LINK].id && !Game.getObjectById(info()[STRUCTURE_LINK].id) ) {
@@ -179,12 +185,6 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         // Link 无法满足的情况下, 建造 Container
         const containerPos = new RoomPosition(info()[STRUCTURE_CONTAINER].pos.x, info()[STRUCTURE_CONTAINER].pos.y, roomName)
 
-        /** 即将消亡, 则逃离原位置 */
-        if ( creep.ticksToLive < 5 || creep.hits < creep.hitsMax ) {
-            creep.travelTo( Game.getObjectById(sourceId), { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
-            return A.proc.OK_STOP_CURRENT
-        }
-
         if ( info()[STRUCTURE_CONTAINER].id && !Game.getObjectById(info()[STRUCTURE_CONTAINER].id) ) {
             A.res.removeSource(roomName, RESOURCE_ENERGY, info()[STRUCTURE_CONTAINER].id)
             info()[STRUCTURE_CONTAINER].id = null
@@ -215,9 +215,9 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         // -> Transfer 到 Container 中
         if ( A.res.query(info()[STRUCTURE_CONTAINER].id, A.res.CAPACITY) > 0 ) {
             const amount = Math.min(A.res.query(info()[STRUCTURE_CONTAINER].id, A.res.CAPACITY), creep.store.getUsedCapacity(RESOURCE_ENERGY))
-            assertWithMsg( A.res.request({ id: info()[STRUCTURE_CONTAINER].id, resourceType: A.res.CAPACITY, amount }, `issueHarvestSourceProc -> 219`) === A.proc.OK, `无法申请 ${info()[STRUCTURE_CONTAINER].id} ${amount} 容量.` )
+            assertWithMsg( A.res.request({ id: info()[STRUCTURE_CONTAINER].id, resourceType: A.res.CAPACITY, amount }) === A.proc.OK, `无法申请 ${info()[STRUCTURE_CONTAINER].id} ${amount} 容量.` )
             assertWithMsg( creep.transfer(Game.getObjectById(info()[STRUCTURE_CONTAINER].id), RESOURCE_ENERGY, amount) === OK, `${creep} 无法传输 ${amount} 能量 到 ${info()[STRUCTURE_CONTAINER].id}` )
-            log(LOG_DEBUG, `${info()[STRUCTURE_CONTAINER].id} 实有 ${Game.getObjectById(info()[STRUCTURE_CONTAINER].id).store[RESOURCE_ENERGY]}, 应有 ${A.res.query(info()[STRUCTURE_CONTAINER].id, RESOURCE_ENERGY)}.`)
+            // log(LOG_DEBUG, `${info()[STRUCTURE_CONTAINER].id} 实有 ${Game.getObjectById(info()[STRUCTURE_CONTAINER].id).store[RESOURCE_ENERGY]}, 应有 ${A.res.query(info()[STRUCTURE_CONTAINER].id, RESOURCE_ENERGY)}.`)
             A.timer.add(Game.time + 1, (id, amount) => A.res.signal(id, RESOURCE_ENERGY, amount), [info()[STRUCTURE_CONTAINER].id, amount], `更新 ${info()[STRUCTURE_CONTAINER].id} 的 energy 数量`)
             return A.proc.OK_STOP_NEXT
         } else return A.proc.OK_STOP_CURRENT // 不能阻塞在容量上, 因为可能要修理 Container

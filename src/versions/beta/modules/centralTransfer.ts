@@ -7,11 +7,10 @@ import { creepModule as C } from "@/modules/creep"
 import { planModule as P } from "@/modules/plan"
 import { transferModule as T } from "@/modules/transfer"
 import { assertWithMsg, convertPosToString, getFileNameAndLineNumber, insertSortedBy, log, LOG_DEBUG } from "@/utils"
+import { getMaintainAmount, getMaxMaintainAmount, getMinMaintainAmount } from "../config.production"
 
 const unitName = 'centralTransfer'
 const tagName = 'transferStructures'
-const MAX_ENERGY_PERCENT = 0.4
-const MIN_FREE_PERCENT = 0.1
 const TRANSFER_UNIT = 200 // 每次运输数量
 
 export function registerCentralTransfer() {
@@ -39,8 +38,20 @@ export function isBelongingToCentralTransferFilling(pos: RoomPosition) {
     } else return false
 }
 
+function triggerStorageEnergyStore(storage: StructureStorage) {
+    return A.res.query(storage.id, RESOURCE_ENERGY) < getMinMaintainAmount(RESOURCE_ENERGY) && A.res.query(storage.id, A.res.CAPACITY) > getMaintainAmount("free before store")
+}
+
 function isStorageEnergyReceivable(storage: StructureStorage) {
-    return A.res.query(storage.id, RESOURCE_ENERGY) < STORAGE_CAPACITY * MAX_ENERGY_PERCENT && A.res.query(storage.id, A.res.CAPACITY) > STORAGE_CAPACITY * MIN_FREE_PERCENT
+    return A.res.query(storage.id, RESOURCE_ENERGY) < getMaxMaintainAmount(RESOURCE_ENERGY) && A.res.query(storage.id, A.res.CAPACITY) > getMaintainAmount("free before store")
+}
+
+function triggerStorageMineralStore(storage: StructureStorage, mineralType: MineralConstant) {
+    return A.res.query(storage.id, mineralType) < getMinMaintainAmount("mineral") && A.res.query(storage.id, A.res.CAPACITY) > getMaintainAmount("free before store")
+}
+
+function isStorageMineralReceivable(storage: StructureStorage, mineralType: MineralConstant) {
+    return A.res.query(storage.id, mineralType) < getMaxMaintainAmount("mineral") && A.res.query(storage.id, A.res.CAPACITY) > getMaintainAmount("free before store")
 }
 
 function issueCentralTransferProc(roomName: string, leftTopPos: Pos ) {
@@ -381,7 +392,7 @@ function issueEnergyStoreProc(roomName: string, leftTopPos: Pos) {
             // 只从 Container 里拿
             const requestedSource = A.res.requestSource(roomName, RESOURCE_ENERGY, TRANSFER_UNIT, posStorage, false, id => Game.getObjectById(id).structureType === STRUCTURE_CONTAINER)
 
-            if ( !Game.rooms[roomName] || !Game.rooms[roomName].storage || A.res.query(Game.rooms[roomName].storage.id, RESOURCE_ENERGY) >= STORAGE_CAPACITY * MAX_ENERGY_PERCENT || A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) <= STORAGE_CAPACITY * MIN_FREE_PERCENT || !requestedSource.id ) return A.proc.STOP_SLEEP
+            if ( !Game.rooms[roomName] || !Game.rooms[roomName].storage || A.res.query(Game.rooms[roomName].storage.id, RESOURCE_ENERGY) >= getMaxMaintainAmount(RESOURCE_ENERGY) || A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) <= getMaintainAmount("free before store") || !requestedSource.id ) return A.proc.STOP_SLEEP
 
             const amount = A.res.query(requestedSource.id, RESOURCE_ENERGY)
             if ( amount < TRANSFER_UNIT )
@@ -397,14 +408,43 @@ function issueEnergyStoreProc(roomName: string, leftTopPos: Pos) {
         }
     ], `${roomName} => Energy Store`, true)
     A.proc.trigger("watch", () => {
-        return !!Game.rooms[roomName] && !!Game.rooms[roomName].storage && isStorageEnergyReceivable(Game.rooms[roomName].storage) && !!A.res.requestSource(roomName, RESOURCE_ENERGY, null, null, false, id => Game.getObjectById(id).structureType === STRUCTURE_CONTAINER).id
+        return !!Game.rooms[roomName] && !!Game.rooms[roomName].storage && triggerStorageEnergyStore(Game.rooms[roomName].storage) && !!A.res.requestSource(roomName, RESOURCE_ENERGY, null, null, false, id => Game.getObjectById(id).structureType === STRUCTURE_CONTAINER).id
+    }, [ pid ])
+}
+
+function issueMineralStoreProc(roomName: string, leftTopPos: Pos, mineralType: MineralConstant) {
+    const posStorage = new RoomPosition(leftTopPos.x + 1, leftTopPos.y + 1, leftTopPos.roomName)
+    const pid = A.proc.createProc([
+        () => {
+            // 只从 Container 里拿
+            const requestedSource = A.res.requestSource(roomName, mineralType, TRANSFER_UNIT, posStorage, false, id => Game.getObjectById(id).structureType === STRUCTURE_CONTAINER)
+
+            if ( !Game.rooms[roomName] || !Game.rooms[roomName].storage || A.res.query(Game.rooms[roomName].storage.id, mineralType) >= getMaxMaintainAmount("mineral") || A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) <= getMaintainAmount("free before store") || !requestedSource.id ) return A.proc.STOP_SLEEP
+
+            const amount = A.res.query(requestedSource.id, mineralType)
+            if ( amount < TRANSFER_UNIT )
+                return A.res.request({ id: requestedSource.id, resourceType: mineralType, amount: {lowerbound: TRANSFER_UNIT, request: 0} })
+
+            const capacity = Math.min(A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY), amount)
+            if ( capacity <= 0 ) return A.proc.STOP_SLEEP
+            assertWithMsg( A.res.request({ id: requestedSource.id, resourceType: mineralType, amount: capacity }) === A.proc.OK, getFileNameAndLineNumber() )
+            assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount: capacity }) === A.proc.OK, getFileNameAndLineNumber() )
+            T.transfer(requestedSource.id, Game.rooms[roomName].storage.id, mineralType, capacity, { allowLooseGrouping: true })
+
+            return A.proc.OK_STOP_CURRENT
+        }
+    ], `${roomName} => Mineral Store`, true)
+    A.proc.trigger("watch", () => {
+        return !!Game.rooms[roomName] && !!Game.rooms[roomName].storage && triggerStorageMineralStore(Game.rooms[roomName].storage, mineralType) && !!A.res.requestSource(roomName, mineralType, null, null, false, id => Game.getObjectById(id).structureType === STRUCTURE_CONTAINER).id
     }, [ pid ])
 }
 
 export function issueCentralTransfer(roomName: string) {
+    const mineralType = Game.rooms[roomName].find(FIND_MINERALS)[0].mineralType
     const planInfo = P.plan(roomName, 'unit', unitName)
     assertWithMsg( planInfo !== null, `运行核心转移模块的房间, 一定需要是可规划完成的` )
     const leftTopPos = planInfo.leftTops[0]
     issueEnergyStoreProc(roomName, leftTopPos)
+    issueMineralStoreProc(roomName, leftTopPos, mineralType)
     return issueCentralTransferProc(roomName, leftTopPos)
 }

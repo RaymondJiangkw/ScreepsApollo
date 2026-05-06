@@ -902,7 +902,7 @@ class StructureResourceManager {
             } else
                 throw new Error(`在向 ${structure} 获得 CAPACITY_MINERAL 信号量时, 发现其没有专门存储矿物的容量`)
         } else
-            value = structure.store.getUsedCapacity(resourceType)
+            value = structure.store.getUsedCapacity(resourceType) || 0
         return value
     }
     /** 在建筑消失后, 执行的消亡 */
@@ -910,14 +910,17 @@ class StructureResourceManager {
         for ( const resourceType in this.#resourceDict )
             Apollo.proc.signal.destroySignal(this.#resourceDict[resourceType])
     }
-    constructor(id: Id<StorableStructure>) {
+    constructor(id: Id<StorableStructure>, resources: ResourceConstant[] | ResourceConstant = null) {
+        if ( !resources ) resources = RESOURCES_ALL
+        if ( !Array.isArray(resources) ) resources = [ resources ]
+
         this.#id = id
         this.#resourceDict = {}
 
         // 初次注册, 登记所有目前已知的建筑
         const structure = Game.getObjectById(id)
         assertWithMsg( !!structure, `注册 ${id} 资源管理时, 建筑应当必定存在` )
-        for ( const resourceType in structure.store )
+        for ( const resourceType of resources )
             this.getSignal(resourceType as ResourceConstant)
         
         // 处理 Capacity
@@ -951,11 +954,26 @@ class ResourceModule {
     CAPACITY_MINERAL: typeof CAPACITY_MINERAL = CAPACITY_MINERAL
     /** 映射建筑 Id 到建筑资源管理 */
     #structureDict: {[id: Id<StorableStructure>]: StructureResourceManager} = {}
-    /** 根据建筑 Id 获得建筑资源管理 */
+    /** 根据建筑 Id 获得建筑资源管理 -- Lazy 注册 */
     #getStructureResourceManager(id: Id<StorableStructure>) {
         if (id in this.#structureDict)
             return this.#structureDict[id]
         return this.#structureDict[id] = new StructureResourceManager(id)
+    }
+    /** 显示注册建筑 -- 非 Lazy 注册 */
+    register(structure: StorableStructure) {
+        const id = structure.id
+        if ( structure.id in this.#structureDict ) return this.#structureDict[id]
+        if ( structure instanceof StructureNuker )
+            return this.#structureDict[id] = new StructureResourceManager(id, [ RESOURCE_ENERGY, RESOURCE_GHODIUM ])
+        else if ( structure instanceof StructureLink )
+            return this.#structureDict[id] = new StructureResourceManager(id, [ RESOURCE_ENERGY ])
+        else if ( structure instanceof StructurePowerSpawn )
+            return this.#structureDict[id] = new StructureResourceManager(id, [ RESOURCE_ENERGY, RESOURCE_POWER ])
+        else if ( structure instanceof StructureTower )
+            return this.#structureDict[id] = new StructureResourceManager(id, [ RESOURCE_ENERGY ])
+        else
+            return this.#structureDict[id] = new StructureResourceManager(id)
     }
     describeCapacity(structure: StorableStructure, resourceType: ResourceConstant | "all") {
         if ( resourceType === "all" ) {

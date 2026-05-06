@@ -233,6 +233,6 @@ export function issueDefendProc(roomName: string) {
     const planInfo = P.plan(roomName, 'unit', 'centralSpawn')
     const safePos = new RoomPosition(planInfo.leftTops[0].x + 3, planInfo.leftTops[0].y, roomName)
 
-    // issueRoomAttackHealDefend(roomName, safePos)
+    issueRoomAttackHealDefend(roomName, safePos)
     issueRoomTowerDefend(roomName)
 }
