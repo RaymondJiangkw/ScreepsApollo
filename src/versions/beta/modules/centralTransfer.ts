@@ -5,20 +5,30 @@
 import { Apollo as A } from "@/framework/apollo"
 import { creepModule as C } from "@/modules/creep"
 import { planModule as P } from "@/modules/plan"
-import { transferModule as T } from "@/modules/transfer"
+import { getTransferUnit, transferModule as T } from "@/modules/transfer"
 import { assertWithMsg, convertPosToString, getFileNameAndLineNumber, insertSortedBy, log, LOG_DEBUG } from "@/utils"
-import { getMaintainAmount, getMaxMaintainAmount, getMinMaintainAmount } from "../config.production"
+import { getStorageMaintainAmount, getStorageMaxMaintainAmount, getStorageMinMaintainAmount } from "../config.production"
 
 const unitName = 'centralTransfer'
 const tagName = 'transferStructures'
-const TRANSFER_UNIT = 200 // 每次运输数量
+
+export function getCentralTransferUnit(controllerLevel: number) {
+    if ( controllerLevel === 8 ) return 2000
+    if ( controllerLevel === 7 ) return 1000
+    if ( controllerLevel === 6 ) return 500
+    if ( controllerLevel === 5 ) return 200
+    if ( controllerLevel === 4 ) return 100
+    return 0
+}
 
 export function registerCentralTransfer() {
     C.design(`centralTransferer`, {
         body: {
             4: [ CARRY, CARRY, MOVE ], 
-            6: [ CARRY, CARRY, CARRY, CARRY, CARRY, MOVE ], 
-            8: [ CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, MOVE ]
+            5: [ CARRY, CARRY, CARRY, CARRY, MOVE ], 
+            6: [ CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, MOVE ], 
+            7: [ CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, MOVE ], 
+            8: [ CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, MOVE ]
         }, 
         priority: C.PRIORITY_IMPORTANT, 
         amount: 1
@@ -39,19 +49,19 @@ export function isBelongingToCentralTransferFilling(pos: RoomPosition) {
 }
 
 function triggerStorageEnergyStore(storage: StructureStorage) {
-    return A.res.query(storage.id, RESOURCE_ENERGY) < getMinMaintainAmount(RESOURCE_ENERGY) && A.res.query(storage.id, A.res.CAPACITY) > getMaintainAmount("free before store")
+    return A.res.query(storage.id, RESOURCE_ENERGY) < getStorageMinMaintainAmount(RESOURCE_ENERGY) && A.res.query(storage.id, A.res.CAPACITY) > getStorageMaintainAmount("free before store")
 }
 
 function isStorageEnergyReceivable(storage: StructureStorage) {
-    return A.res.query(storage.id, RESOURCE_ENERGY) < getMaxMaintainAmount(RESOURCE_ENERGY) && A.res.query(storage.id, A.res.CAPACITY) > getMaintainAmount("free before store")
+    return A.res.query(storage.id, RESOURCE_ENERGY) < getStorageMaxMaintainAmount(RESOURCE_ENERGY) && A.res.query(storage.id, A.res.CAPACITY) > getStorageMaintainAmount("free before store")
 }
 
 function triggerStorageMineralStore(storage: StructureStorage, mineralType: MineralConstant) {
-    return A.res.query(storage.id, mineralType) < getMinMaintainAmount("mineral") && A.res.query(storage.id, A.res.CAPACITY) > getMaintainAmount("free before store")
+    return A.res.query(storage.id, mineralType) < getStorageMinMaintainAmount("mineral") && A.res.query(storage.id, A.res.CAPACITY) > getStorageMaintainAmount("free before store")
 }
 
 function isStorageMineralReceivable(storage: StructureStorage, mineralType: MineralConstant) {
-    return A.res.query(storage.id, mineralType) < getMaxMaintainAmount("mineral") && A.res.query(storage.id, A.res.CAPACITY) > getMaintainAmount("free before store")
+    return A.res.query(storage.id, mineralType) < getStorageMaxMaintainAmount("mineral") && A.res.query(storage.id, A.res.CAPACITY) > getStorageMaintainAmount("free before store")
 }
 
 function issueCentralTransferProc(roomName: string, leftTopPos: Pos ) {
@@ -216,7 +226,12 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos ) {
             }
             if ( creep.store.getUsedCapacity() === 0 ) return A.proc.OK
             for ( const resourceType in creep.store ) {
-                creep.drop(resourceType as ResourceConstant)
+                const amount = creep.store.getUsedCapacity(resourceType as ResourceConstant)
+                if ( !!Game.rooms[roomName].storage && A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) >= amount ) {
+                    assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount: amount }) === A.proc.OK, getFileNameAndLineNumber() )
+                    assertWithMsg( creep.transfer(Game.rooms[roomName].storage, resourceType as ResourceConstant, amount) === OK, getFileNameAndLineNumber() )
+                    A.timer.add(Game.time + 1, (id, resourceType, amount) => A.res.signal(id, resourceType, amount), [ Game.rooms[roomName].storage.id, resourceType, amount ], `更新 ${roomName}'s Storage`)
+                } else creep.drop(resourceType as ResourceConstant)
                 return A.proc.OK_STOP_CURRENT
             }
         }, 
@@ -387,24 +402,29 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos ) {
 
 function issueEnergyStoreProc(roomName: string, leftTopPos: Pos) {
     const posStorage = new RoomPosition(leftTopPos.x + 1, leftTopPos.y + 1, leftTopPos.roomName)
+    let oneTimeTransferSignal = A.proc.signal.createSignal(1)
     const pid = A.proc.createProc([
+        ['wait', () => A.proc.signal.Swait({ signalId: oneTimeTransferSignal, lowerbound: 1, request: 0 })], 
         () => {
+            const TRANSFER_UNIT = getTransferUnit(Game.rooms[roomName].controller.level)
             // 只从 Container 里拿
             const requestedSource = A.res.requestSource(roomName, RESOURCE_ENERGY, TRANSFER_UNIT, posStorage, false, id => Game.getObjectById(id).structureType === STRUCTURE_CONTAINER)
 
-            if ( !Game.rooms[roomName] || !Game.rooms[roomName].storage || A.res.query(Game.rooms[roomName].storage.id, RESOURCE_ENERGY) >= getMaxMaintainAmount(RESOURCE_ENERGY) || A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) <= getMaintainAmount("free before store") || !requestedSource.id ) return A.proc.STOP_SLEEP
+            if ( !Game.rooms[roomName] || !Game.rooms[roomName].storage || A.res.query(Game.rooms[roomName].storage.id, RESOURCE_ENERGY) >= getStorageMaxMaintainAmount(RESOURCE_ENERGY) || A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) <= getStorageMaintainAmount("free before store") || !requestedSource.id ) return A.proc.STOP_SLEEP
 
             const amount = A.res.query(requestedSource.id, RESOURCE_ENERGY)
             if ( amount < TRANSFER_UNIT )
                 return A.res.request({ id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: {lowerbound: TRANSFER_UNIT, request: 0} })
 
-            const capacity = Math.min(A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY), amount)
+            const capacity = Math.min(getStorageMaxMaintainAmount(RESOURCE_ENERGY) - A.res.query(Game.rooms[roomName].storage.id, RESOURCE_ENERGY), A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) - getStorageMaintainAmount("free before store"), amount)
             if ( capacity <= 0 ) return A.proc.STOP_SLEEP
+
+            assertWithMsg( A.proc.signal.Swait({ signalId: oneTimeTransferSignal, lowerbound: 1, request: 1 }) === A.proc.OK, getFileNameAndLineNumber() )
             assertWithMsg( A.res.request({ id: requestedSource.id, resourceType: RESOURCE_ENERGY, amount: capacity }) === A.proc.OK, getFileNameAndLineNumber() )
             assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount: capacity }) === A.proc.OK, getFileNameAndLineNumber() )
-            T.transfer(requestedSource.id, Game.rooms[roomName].storage.id, RESOURCE_ENERGY, capacity, { allowLooseGrouping: true })
+            T.transfer(requestedSource.id, Game.rooms[roomName].storage.id, RESOURCE_ENERGY, capacity, { allowLooseGrouping: true, callback: () => A.proc.signal.Ssignal({ signalId: oneTimeTransferSignal, request: 1 }) })
 
-            return A.proc.OK_STOP_CURRENT
+            return [ A.proc.OK_STOP_CUSTOM, "wait" ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
         }
     ], `${roomName} => Energy Store`, true)
     A.proc.trigger("watch", () => {
@@ -414,24 +434,29 @@ function issueEnergyStoreProc(roomName: string, leftTopPos: Pos) {
 
 function issueMineralStoreProc(roomName: string, leftTopPos: Pos, mineralType: MineralConstant) {
     const posStorage = new RoomPosition(leftTopPos.x + 1, leftTopPos.y + 1, leftTopPos.roomName)
+    let oneTimeTransferSignal = A.proc.signal.createSignal(1)
     const pid = A.proc.createProc([
+        ['wait', () => A.proc.signal.Swait({ signalId: oneTimeTransferSignal, lowerbound: 1, request: 0 })], 
         () => {
+            const TRANSFER_UNIT = getTransferUnit(Game.rooms[roomName].controller.level)
             // 只从 Container 里拿
             const requestedSource = A.res.requestSource(roomName, mineralType, TRANSFER_UNIT, posStorage, false, id => Game.getObjectById(id).structureType === STRUCTURE_CONTAINER)
 
-            if ( !Game.rooms[roomName] || !Game.rooms[roomName].storage || A.res.query(Game.rooms[roomName].storage.id, mineralType) >= getMaxMaintainAmount("mineral") || A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) <= getMaintainAmount("free before store") || !requestedSource.id ) return A.proc.STOP_SLEEP
+            if ( !Game.rooms[roomName] || !Game.rooms[roomName].storage || A.res.query(Game.rooms[roomName].storage.id, mineralType) >= getStorageMaxMaintainAmount("mineral") || A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) <= getStorageMaintainAmount("free before store") || !requestedSource.id ) return A.proc.STOP_SLEEP
 
             const amount = A.res.query(requestedSource.id, mineralType)
             if ( amount < TRANSFER_UNIT )
                 return A.res.request({ id: requestedSource.id, resourceType: mineralType, amount: {lowerbound: TRANSFER_UNIT, request: 0} })
 
-            const capacity = Math.min(A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY), amount)
+            const capacity = Math.min(getStorageMaxMaintainAmount("mineral") - A.res.query(Game.rooms[roomName].storage.id, mineralType), A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) - getStorageMaintainAmount("free before store"), amount)
             if ( capacity <= 0 ) return A.proc.STOP_SLEEP
+
+            assertWithMsg( A.proc.signal.Swait({ signalId: oneTimeTransferSignal, lowerbound: 1, request: 1 }) === A.proc.OK, getFileNameAndLineNumber() )
             assertWithMsg( A.res.request({ id: requestedSource.id, resourceType: mineralType, amount: capacity }) === A.proc.OK, getFileNameAndLineNumber() )
             assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount: capacity }) === A.proc.OK, getFileNameAndLineNumber() )
-            T.transfer(requestedSource.id, Game.rooms[roomName].storage.id, mineralType, capacity, { allowLooseGrouping: true })
+            T.transfer(requestedSource.id, Game.rooms[roomName].storage.id, mineralType, capacity, { allowLooseGrouping: true, callback: () => A.proc.signal.Ssignal({ signalId: oneTimeTransferSignal, request: 1 })})
 
-            return A.proc.OK_STOP_CURRENT
+            return [ A.proc.OK_STOP_CUSTOM, "wait" ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
         }
     ], `${roomName} => Mineral Store`, true)
     A.proc.trigger("watch", () => {

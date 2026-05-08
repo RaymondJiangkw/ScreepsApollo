@@ -97,11 +97,12 @@ export function constructArray<T>(dimensions: number[], fillIn: T) {
     return constructor(ret, 0)
 }
 
-export function getAvailableSurroundingPos(pos: Pos): Pos[] {
+export function getAvailableSurroundingPos(pos: Pos, range: number = 1): Pos[] {
     const terrain = new Room.Terrain(pos.roomName)
     const ret: Pos[] = []
-    for ( let dx of [-1, 0, 1] ) {
-        for ( let dy of [-1, 0, 1] ) {
+    const iterArr = Array.from({ length: 2 * range + 1 }, (_, i) => i - range)
+    for ( let dx of iterArr ) {
+        for ( let dy of iterArr ) {
             if ( dx === 0 && dy === 0 ) continue
             if ( pos.x + dx < 0 || pos.x + dx >= 50 || pos.y + dy < 0 || pos.y + dy >= 50 ) continue
             if ( terrain.get( pos.x + dx, pos.y + dy ) === TERRAIN_MASK_WALL ) continue
@@ -164,23 +165,29 @@ function isRoomXY(roomName: string): boolean {
 }
 
 function roomXY(roomName: string): { x: number; y: number } {
-  const match = roomName.match(/^([WE])(\d+)([NS])(\d+)$/);
-  if (!match) throw new Error(`Invalid room name: ${roomName}`);
-
-  const [, ew, xStr, ns, yStr] = match;
-
-  // W and N are negative, but shifted by 1 because there is no zero gap
-  const x = ew === "E" ? Number(xStr) : -Number(xStr) - 1;
-  const y = ns === "S" ? Number(yStr) : -Number(yStr) - 1;
-
-  return { x, y };
+    let xx = parseInt(roomName.substr(1), 10)
+    let verticalPos = 2
+    if (xx >= 100) {
+        verticalPos = 4
+    } else if (xx >= 10) {
+        verticalPos = 3
+    }
+    let yy = parseInt(roomName.substr(verticalPos + 1), 10)
+    let horizontalDir = roomName.charAt(0)
+    let verticalDir = roomName.charAt(verticalPos)
+    if (horizontalDir === 'W' || horizontalDir === 'w') {
+        xx = -xx - 1
+    }
+    if (verticalDir === 'N' || verticalDir === 'n') {
+        yy = -yy - 1
+    }
+    return { x: xx, y: yy }
 }
 
 export function roomManhattanDistance(a: string, b: string): number {
-  const A = roomXY(a);
-  const B = roomXY(b);
-
-  return Math.abs(A.x - B.x) + Math.abs(A.y - B.y);
+    const A = roomXY(a)
+    const B = roomXY(b)
+    return Math.abs(A.x - B.x) + Math.abs(A.y - B.y)
 }
 
 export function findDistanceTo(u: HasPos | Pos, v: HasPos | Pos | (HasPos | Pos)[]): number[] {

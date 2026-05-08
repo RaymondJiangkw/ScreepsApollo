@@ -7,7 +7,6 @@ import { planModule as P } from "@/modules/plan"
 import { creepModule as C } from "@/modules/creep"
 import { transferModule as T } from "@/modules/transfer"
 import { assertWithMsg, calcBodyEffectiveness, getAvailableSurroundingPos, log, LOG_DEBUG, LOG_ERR, LOG_INFO } from "@/utils"
-import { getMaintainAmount } from "../config.production"
 
 /** 管理 Source 附近的建筑 */
 type SourceRelevantStructures = {

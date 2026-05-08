@@ -524,7 +524,7 @@ class CreepSpawnModule {
             if ( !(roomName in Game.rooms) || !Game.rooms[roomName].controller.my ) return false
             const remainingOrderAmount = this.#calRequestAmount(roomName)
             log(LOG_DEBUG, `当前 ${roomName} 内剩余需要生产的 Creep 数量为 ${remainingOrderAmount}.`)
-            return remainingOrderAmount > 0
+            return remainingOrderAmount > 0 && Game.time % 2 === 0
         }, [ pid ])
     }
 

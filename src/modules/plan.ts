@@ -693,7 +693,7 @@ class PlanModule {
                     for ( const structureType of unit.structureTypes ) {
                         if ( !(structureType in ret) ) ret[structureType] = []
                         // Tag 越多越优先
-                        ret[structureType].push(...unit.getStructurePositions(structureType, pos).map(p => ({pos: new RoomPosition(p.x, p.y, p.roomName), tag: unit.getPositionTags(p.x - pos.x, p.y - pos.y)})).sort((u, v) => v.tag.length - u.tag.length))
+                        ret[structureType].push(...unit.getStructurePositions(structureType, pos).map(p => ({pos: new RoomPosition(p.x, p.y, p.roomName), tag: structureType !== STRUCTURE_RAMPART ? unit.getPositionTags(p.x - pos.x, p.y - pos.y) : []})).sort((u, v) => v.tag.length - u.tag.length))
                     }
                 })
                 return { structures: ret, leftTops: unitPos.map(p => new RoomPosition(p.x, p.y, p.roomName)) }
@@ -1037,23 +1037,19 @@ class PlanModule {
                     // 注册新建筑
                     A.timer.add(Game.time + 1, pos => {
                         const info = this.#constructionSite2Info[convertPosToString(pos)]
-                        if ( info.tag.length === 0 ) return
-                        // 校验建筑确实存在
-                        assertWithMsg( !!Game.rooms[info.pos.roomName], `${info.pos.roomName} 应当可视` )
                         const structure = Game.rooms[info.pos.roomName].lookForAt(LOOK_STRUCTURES, new RoomPosition(info.pos.x, info.pos.y, info.pos.roomName)).filter(s => s.structureType === info.structureType)[0]
                         if ( !structure )
                             log(LOG_ERR, `期望在 ${convertPosToString(info.pos)} 找到建筑 ${info.structureType}, 但是没有找到`)
-                        else {
-                            // 更新 建筑 Memory - 用于建筑破坏时更新
-                            getStructureMemory(structure.id).pos = info.pos
-                            getStructureMemory(structure.id).unitName = info.unitName
-                            getStructureMemory(structure.id).tag = info.tag
-                            // 更新相关信号量
-                            for ( const t of info.tag )
-                                this.#updateUnitTagSignal(this.#getRoom2UnitTagSignal(info.pos.roomName, info.unitName, t), info.pos.roomName, info.unitName, t)
-                            // 注册建筑 Store
-                            if ( !!(structure as StorableStructure).store && !(structure instanceof StructureSpawn) && !(structure instanceof StructureExtension) ) A.res.register(structure as StorableStructure)
-                        }
+                        // 注册建筑 Store
+                        if ( !!(structure as StorableStructure).store && !(structure instanceof StructureSpawn) && !(structure instanceof StructureExtension) ) A.res.register(structure as StorableStructure)
+                        if ( info.structureType === STRUCTURE_RAMPART || info.tag.length === 0 ) return
+                        // 更新 建筑 Memory - 用于建筑破坏时更新
+                        getStructureMemory(structure.id).pos = info.pos
+                        getStructureMemory(structure.id).unitName = info.unitName
+                        getStructureMemory(structure.id).tag = info.tag
+                        // 更新相关信号量
+                        for ( const t of info.tag )
+                            this.#updateUnitTagSignal(this.#getRoom2UnitTagSignal(info.pos.roomName, info.unitName, t), info.pos.roomName, info.unitName, t)
                     }, [ target.pos ], `注册即将完成的建筑 ${target.id} (${target.pos}, ${target.structureType})`)
                 }
             }

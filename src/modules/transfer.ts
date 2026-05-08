@@ -26,7 +26,8 @@ type TransferTaskDescription = {
     loseCallback?   : (amount: number, resourceType: ResourceConstant) => void, 
     callback?       : () => void, 
     finishWithdraw  : boolean, 
-    allowLooseGrouping?: boolean
+    allowLooseGrouping?: boolean, 
+    disallowGrouping?: boolean
 }
 
 interface TransferOpts {
@@ -39,6 +40,8 @@ interface TransferOpts {
     callback?: () => void
     /** 是否允许不匹配 `loseCallback` 和 `callback` 进行合并 */
     allowLooseGrouping?: boolean
+    /** 是否不允许合并 */
+    disallowGrouping?: boolean
 }
 
 type TransferTarget = Id<StorableStructure> | { id: Id<StorableStructure> | null, pos: Pos }
@@ -116,7 +119,7 @@ class TransferModule {
                             // 尝试合并
                             let find = false
                             for ( const t of this.#getTaskQueue(roomName).queue ) {
-                                if ( t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
+                                if ( !getCurrentTransferTask().disallowGrouping && t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
                                     for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
                                         const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
                                         if ( !!c ) c.amount += amount
@@ -175,7 +178,7 @@ class TransferModule {
                                 // 尝试合并
                                 let find = false
                                 for ( const t of this.#getTaskQueue(roomName).queue ) {
-                                    if ( t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
+                                    if ( !getCurrentTransferTask().disallowGrouping && t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
                                         for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
                                             const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
                                             if ( !!c ) c.amount += amount
@@ -199,7 +202,11 @@ class TransferModule {
                         }
                         
                         // 在最后一秒 withdraw 或 transfer 会返回成功, 但是不会执行
-                        if ( creep.ticksToLive === 1 ) return A.proc.OK_STOP_CURRENT
+                        /** 即将消亡, 则逃离原位置 */
+                        if ( creep.ticksToLive < 5 ) {
+                            creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                            return A.proc.OK_STOP_CURRENT
+                        }
 
                         assertWithMsg( creep.store.getFreeCapacity() > 0, getFileNameAndLineNumber() )
                         assertWithMsg( !!getCurrentTransferTask().fromId, `源 Id 未定时, 尚未实现` )
@@ -265,7 +272,7 @@ class TransferModule {
                                 // 尝试合并
                                 let find = false
                                 for ( const t of this.#getTaskQueue(roomName).queue ) {
-                                    if ( t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
+                                    if ( !getCurrentTransferTask().disallowGrouping && t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
                                         for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
                                             const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
                                             if ( !!c ) c.amount += amount
@@ -289,7 +296,10 @@ class TransferModule {
                         }
                         
                         // 在最后一秒 withdraw 或 transfer 会返回成功, 但是不会执行
-                        if ( creep.ticksToLive === 1 ) return A.proc.OK_STOP_CURRENT
+                        if ( creep.ticksToLive < 5 ) {
+                            creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                            return A.proc.OK_STOP_CURRENT
+                        }
 
                         if ( creep.pos.roomName !== getCurrentTransferTask().toPos.roomName || creep.pos.getRangeTo(getCurrentTransferTask().toPos.x, getCurrentTransferTask().toPos.y) > 1) {
                             creep.moveTo(new RoomPosition(getCurrentTransferTask().toPos.x, getCurrentTransferTask().toPos.y, getCurrentTransferTask().toPos.roomName))
@@ -330,7 +340,7 @@ class TransferModule {
                             // 尝试合并
                             let find = false
                             for ( const t of this.#getTaskQueue(roomName).queue ) {
-                                if ( t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
+                                if ( !getCurrentTransferTask().disallowGrouping && t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
                                     for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
                                         const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
                                         if ( !!c ) c.amount += amount
@@ -389,7 +399,8 @@ class TransferModule {
                     loseCallback: opts.loseCallback, 
                     callback: opts.callback, 
                     finishWithdraw: false, id: generate_random_hex(8), 
-                    allowLooseGrouping: opts.allowLooseGrouping
+                    allowLooseGrouping: opts.allowLooseGrouping, 
+                    disallowGrouping: opts.disallowGrouping
                 }
                 log(LOG_DEBUG, `运输任务 从 ${from.id} 到 ${to.id} 运输 ${resourceType} (${amount})`)
                 // 判定 TakeOver
@@ -399,7 +410,7 @@ class TransferModule {
                         // 尝试合并
                         let find = false
                         for ( const t of this.#takeOverInfo[queueId].queue ) {
-                            if ( t.fromId === taskDescription.fromId && t.toId === taskDescription.toId && t.priority === taskDescription.priority && t.afterSignalId === taskDescription.afterSignalId && ( opts.allowLooseGrouping || (t.loseCallback === taskDescription.loseCallback && t.callback === taskDescription.callback) ) ) {
+                            if ( !taskDescription.disallowGrouping && t.fromId === taskDescription.fromId && t.toId === taskDescription.toId && t.priority === taskDescription.priority && t.afterSignalId === taskDescription.afterSignalId && ( opts.allowLooseGrouping || (t.loseCallback === taskDescription.loseCallback && t.callback === taskDescription.callback) ) ) {
                                 const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
                                 if ( !!c ) c.amount += amount
                                 else t.content.push({ resourceType, amount })
@@ -416,7 +427,7 @@ class TransferModule {
                     // 尝试合并
                     let find = false
                     for ( const t of this.#getTaskQueue(from.pos.roomName).queue ) {
-                        if ( t.fromId === taskDescription.fromId && t.toId === taskDescription.toId && t.priority === taskDescription.priority && t.afterSignalId === taskDescription.afterSignalId && ( opts.allowLooseGrouping || (t.loseCallback === taskDescription.loseCallback && t.callback === taskDescription.callback) ) ) {
+                        if ( !taskDescription.disallowGrouping && t.fromId === taskDescription.fromId && t.toId === taskDescription.toId && t.priority === taskDescription.priority && t.afterSignalId === taskDescription.afterSignalId && ( opts.allowLooseGrouping || (t.loseCallback === taskDescription.loseCallback && t.callback === taskDescription.callback) ) ) {
                             const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
                             if ( !!c ) c.amount += amount
                             else t.content.push({ resourceType, amount })
@@ -494,11 +505,22 @@ class TransferModule {
                 4: [ MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ], 
                 5: [ MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ], 
                 6: [ MOVE, MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ], 
-                7: [ MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ]
+                7: [ MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ], 
             }, 
             amount: this.#MAXIMUM_TRANSFERRING_NUM
         })
     }
+}
+
+export function getTransferUnit(controllerLevel: number) {
+    if ( controllerLevel === 1 ) return 50
+    if ( controllerLevel === 2 ) return 100
+    if ( controllerLevel === 3 ) return 200
+    if ( controllerLevel === 4 ) return 300
+    if ( controllerLevel === 5 ) return 400
+    if ( controllerLevel === 6 ) return 500
+    if ( controllerLevel >= 7 ) return 1000
+    return 0
 }
 
 export const transferModule = new TransferModule()

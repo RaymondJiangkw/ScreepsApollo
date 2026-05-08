@@ -927,7 +927,7 @@ class StructureResourceManager {
         if ( structure instanceof StructureLab || structure instanceof StructureNuker || structure instanceof StructurePowerSpawn ) {
             this.getSignal(CAPACITY_ENERGY)
             this.getSignal(CAPACITY_MINERAL)
-        } else if ( structure instanceof StructureLink ) {
+        } else if ( structure instanceof StructureLink || structure instanceof StructureTower ) {
             this.getSignal(CAPACITY_ENERGY)
         } else this.getSignal(CAPACITY)
     }
@@ -977,11 +977,11 @@ class ResourceModule {
     }
     describeCapacity(structure: StorableStructure, resourceType: ResourceConstant | "all") {
         if ( resourceType === "all" ) {
-            assertWithMsg( !(structure instanceof StructureLab || structure instanceof StructurePowerSpawn || structure instanceof StructureNuker || structure instanceof StructureLink), getFileNameAndLineNumber() )
+            assertWithMsg( !(structure instanceof StructureLab || structure instanceof StructurePowerSpawn || structure instanceof StructureNuker || structure instanceof StructureLink || structure instanceof StructureTower), getFileNameAndLineNumber() )
             return CAPACITY
         }
 
-        if ( structure instanceof StructureLab || structure instanceof StructurePowerSpawn || structure instanceof StructureNuker || structure instanceof StructureLink ) {
+        if ( structure instanceof StructureLab || structure instanceof StructurePowerSpawn || structure instanceof StructureNuker || structure instanceof StructureLink || structure instanceof StructureTower) {
             if ( resourceType === RESOURCE_ENERGY ) return CAPACITY_ENERGY
             else return CAPACITY_MINERAL
         }
