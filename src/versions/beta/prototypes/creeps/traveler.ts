@@ -19,7 +19,7 @@ export class Traveler {
      */
 
     public static travelTo(creep: Creep, destination: HasPos|RoomPosition, options: TravelToOptions = {}): CreepMoveReturnCode | ERR_INVALID_ARGS | ERR_NO_PATH {
-
+        _.defaults(options, { stuckValue: DEFAULT_STUCK_VALUE })
         // uncomment if you would like to register hostile rooms entered
         this.updateRoomStatus(creep.room);
 
@@ -52,7 +52,7 @@ export class Traveler {
 
         // initialize data object
         if (!(creep.memory as any)._trav) {
-            delete (creep.memory as any)._travel;
+            delete (creep.memory as any)._trav;
             (creep.memory as any)._trav = { flee: options.flee || false };
         }
         let travelData = (creep.memory as any)._trav as TravelData;
@@ -71,8 +71,7 @@ export class Traveler {
         }
 
         // handle case where creep is stuck
-        if (!options.stuckValue) { options.stuckValue = DEFAULT_STUCK_VALUE; }
-        if (state.stuckCount >= options.stuckValue && Math.random() > .5) {
+        if (state.stuckCount >= options.stuckValue) {
             options.ignoreCreeps = false;
             options.freshMatrix = true;
             delete travelData.path;
@@ -247,7 +246,7 @@ export class Traveler {
                                  options: TravelToOptions = {}): PathfinderReturn {
 
         _.defaults(options, {
-            ignoreCreeps: true, 
+            ignoreCreeps: false, 
             maxOps: DEFAULT_MAXOPS, 
             range: 1, 
             flee: false, 

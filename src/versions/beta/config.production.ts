@@ -9,6 +9,7 @@ export function registerProduction() {
     if ( !("_prod" in Memory) ) (Memory as any)._prod = {}
     if ( !("storage" in (Memory as any)._prod) ) (Memory as any)._prod.storage = {};
     if ( !("terminal" in (Memory as any)._prod) ) (Memory as any)._prod.terminal = {};
+    if ( !("lab" in (Memory as any)._prod) ) (Memory as any)._prod.lab = {};
 
     (Memory as any)._prod.storage = {
         maintain_min: {
@@ -17,7 +18,8 @@ export function registerProduction() {
         }, 
         maintain_max: {
             [RESOURCE_ENERGY]: STORAGE_CAPACITY * 0.4, 
-            "mineral": STORAGE_CAPACITY * 0.2
+            "mineral": STORAGE_CAPACITY * 0.2, 
+            "deposit": STORAGE_CAPACITY * 0.2
         }, 
         maintain: {
             "free before store": STORAGE_CAPACITY * 0.1
@@ -45,22 +47,52 @@ export function registerProduction() {
             [RESOURCE_LEMERGIUM]: {min: 3000, max: 6000}, 
             [RESOURCE_KEANIUM]: {min: 3000, max: 6000}, 
             [RESOURCE_ZYNTHIUM]: {min: 3000, max: 6000}, 
-            [RESOURCE_CATALYST]: {min: 3000, max: 6000}, 
-            [RESOURCE_GHODIUM]: {min: 3000, max: 6000}
+            [RESOURCE_CATALYST]: {min: 3000, max: 6000}
         }
-    }
+    };
+
+    /** 按照优先级排序, 每次从头开始扫描, 判断生产哪个 */
+    (Memory as any)._prod.lab = [
+        // G
+        [ RESOURCE_GHODIUM, {min: 3000, max: 6000} ], 
+        // XKHO_2: Ranged Attack
+        [ RESOURCE_CATALYZED_KEANIUM_ALKALIDE, { min: 3000, max: 6000 } ], 
+        // XLHO_2: Heal
+        [ RESOURCE_CATALYZED_LEMERGIUM_ALKALIDE, { min: 3000, max: 6000 } ], 
+        // XZHO_2: Move
+        [ RESOURCE_CATALYZED_ZYNTHIUM_ALKALIDE, { min: 3000, max: 6000 } ], 
+        // XGHO_2: Tough
+        [ RESOURCE_CATALYZED_GHODIUM_ALKALIDE, { min: 3000, max: 6000 } ], 
+        // XUH2_O: Attack
+        [ RESOURCE_CATALYZED_UTRIUM_ACID, { min: 3000, max: 6000 } ], 
+        // XKH2_O: Carry
+        [ RESOURCE_CATALYZED_KEANIUM_ACID, { min: 3000, max: 6000 } ], 
+        // XZH2_O: Dismental
+        [ RESOURCE_CATALYZED_ZYNTHIUM_ACID, { min: 3000, max: 6000 } ], 
+        // XUHO_2: Harvest
+        [ RESOURCE_CATALYZED_UTRIUM_ALKALIDE, { min: 3000, max: 6000 } ], 
+        // XGH2_O: Upgrade
+        [ RESOURCE_CATALYZED_GHODIUM_ACID, { min: 3000, max: 6000 } ], 
+        // XLH2_O: Repair / Build
+        [ RESOURCE_CATALYZED_LEMERGIUM_ACID, { min: 3000, max: 6000 } ]
+    ]
+}
+
+/** Lab */
+export function getLabInfo(): [ MineralCompoundConstant, { min: number, max: number } ][] {
+    return (Memory as any)._prod.lab
 }
 
 /** Storage */
-export function getStorageMaintainAmount(resourceType: ResourceConstant | "mineral" | "free before store") {
+export function getStorageMaintainAmount(resourceType: ResourceConstant | "mineral" | "deposit" | "free before store") {
     return (Memory as any)._prod.storage.maintain[resourceType] || 0
 }
 
-export function getStorageMinMaintainAmount(resourceType: ResourceConstant | "mineral" | "free before store") {
+export function getStorageMinMaintainAmount(resourceType: ResourceConstant | "mineral" | "deposit" | "free before store") {
     return (Memory as any)._prod.storage.maintain_min[resourceType] || 0
 }
 
-export function getStorageMaxMaintainAmount(resourceType: ResourceConstant | "mineral" | "free before store") {
+export function getStorageMaxMaintainAmount(resourceType: ResourceConstant | "mineral" | "deposit" | "free before store") {
     return (Memory as any)._prod.storage.maintain_max[resourceType] || 0
 }
 

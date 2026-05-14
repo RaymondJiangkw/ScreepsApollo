@@ -195,3 +195,18 @@ export function findDistanceTo(u: HasPos | Pos, v: HasPos | Pos | (HasPos | Pos)
     if ( !!(u as HasPos).pos ) u = (u as HasPos).pos
     return _.map(v, i => new RoomPosition((u as Pos).x, (u as Pos).y, (u as Pos).roomName).getRangeTo(i as (HasPos | RoomPosition)))
 }
+
+export function calcTowerAttackHits(range: number) {
+    let amount = TOWER_POWER_ATTACK
+    if(range > TOWER_OPTIMAL_RANGE) {
+        if(range > TOWER_FALLOFF_RANGE) {
+            range = TOWER_FALLOFF_RANGE;
+        }
+        amount -= amount * TOWER_FALLOFF * (range - TOWER_OPTIMAL_RANGE) / (TOWER_FALLOFF_RANGE - TOWER_OPTIMAL_RANGE);
+    }
+    return amount
+}
+
+export function floorTo5X(n: number) {
+    return Math.floor(n / 5) * 5
+}

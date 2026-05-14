@@ -7,6 +7,7 @@ import { planModule as P } from "@/modules/plan"
 import { creepModule as C } from '@/modules/creep'
 import { assertWithMsg, calcBodyEffectiveness, getAvailableSurroundingPos, getFileNameAndLineNumber, log, LOG_DEBUG } from '@/utils'
 import { getEnergy } from './shared'
+import { getStructureMemory } from '@/modules/structureMemory'
 
 export function issueRepairStructure(roomName: string) {
     let workerName = null
@@ -108,6 +109,8 @@ export function issueRepairStructure(roomName: string) {
             const structuresNeedRepair = Game.rooms[roomName].find(FIND_STRUCTURES).filter(s => s.structureType !== STRUCTURE_RAMPART && s.structureType !== STRUCTURE_WALL && s.hits < s.hitsMax).sort((u, v) => u.hits / u.hitsMax - v.hits / v.hitsMax).map(s => { return { id: s.id, pos: s.pos, hits: s.hits, hitsMax: s.hitsMax } })
             if ( structuresNeedRepair.length === 0 ) return A.proc.STOP_SLEEP
             towers.forEach(tower => {
+                if ( !!(getStructureMemory(tower.id) as any)._lastRepairTick && (getStructureMemory(tower.id) as any)._lastRepairTick >= Game.time ) return
+
                 if ( A.res.query(tower.id, RESOURCE_ENERGY) >= TOWER_CAPACITY / 2 ) {
                     let targetStructure = null
                     for ( const structureInfo of structuresNeedRepair ) {
@@ -126,7 +129,9 @@ export function issueRepairStructure(roomName: string) {
                     if ( !!targetStructure ) {
                         assertWithMsg( A.res.request({ id: tower.id, resourceType: RESOURCE_ENERGY, amount: TOWER_ENERGY_COST }) === A.proc.OK )
                         A.timer.add(Game.time + 1, id => A.res.signal(id, A.res.CAPACITY_ENERGY, TOWER_ENERGY_COST), [ tower.id ], `更新塔 ${tower.id} 的容量`)
-                        tower.repair(targetStructure)
+                        const retCode = tower.repair(targetStructure);
+                        (getStructureMemory(tower.id) as any)._lastRepairTick = Game.time
+                        assertWithMsg( retCode === OK, `repairStructure L130 -> ${roomName}, ${tower.id}, ${retCode}` )
                     }
                 }
             })

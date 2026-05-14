@@ -13,22 +13,20 @@ const unitName = 'centralTransfer'
 const tagName = 'transferStructures'
 
 export function getCentralTransferUnit(controllerLevel: number) {
-    if ( controllerLevel === 8 ) return 2000
-    if ( controllerLevel === 7 ) return 1000
-    if ( controllerLevel === 6 ) return 500
-    if ( controllerLevel === 5 ) return 200
-    if ( controllerLevel === 4 ) return 100
+    if ( controllerLevel >= 7 ) return 2000
+    if ( controllerLevel === 6 ) return 1000
+    if ( controllerLevel === 5 ) return 500
+    if ( controllerLevel === 4 ) return 200
     return 0
 }
 
 export function registerCentralTransfer() {
     C.design(`centralTransferer`, {
         body: {
-            4: [ CARRY, CARRY, MOVE ], 
-            5: [ CARRY, CARRY, CARRY, CARRY, MOVE ], 
-            6: [ CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, MOVE ], 
-            7: [ CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, MOVE ], 
-            8: [ CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, MOVE ]
+            4: [ CARRY, CARRY, CARRY, CARRY, MOVE ], 
+            5: [ CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, MOVE ], 
+            6: [ CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, MOVE ], 
+            7: [ CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, MOVE ]
         }, 
         priority: C.PRIORITY_IMPORTANT, 
         amount: 1

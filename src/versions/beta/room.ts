@@ -17,77 +17,18 @@ import { issueRepairStructure } from './modules/repairStructure'
 import { issueBuildProc } from './modules/buildStructure'
 import { issuePaintProc } from './modules/paintRampart'
 import { getEnergy } from './modules/shared'
-
-function issueFillProc(roomName: string) {
-    let workerName = null
-
-    function gotoSpawn(name: string) {
-        const creep = Game.creeps[name]
-        /** 检测到错误, 立即释放资源 */
-        if ( !creep || creep.hits < creep.hitsMax ) {
-            C.cancel(name)
-            workerName = null
-            return [A.proc.STOP_ERR, `Creep [${name}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
-        }
-
-        /** 最后几秒, 撤离 */
-        if ( creep.ticksToLive < 3 ) {
-            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
-                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
-            return A.proc.OK_STOP_CURRENT
-        }
-
-        const spawns = Game.rooms[roomName].find<FIND_STRUCTURES, StructureSpawn | StructureExtension | StructureTower>(FIND_STRUCTURES, { filter: s => (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_EXTENSION) && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && !isBelongingToQuickEnergyFilling(s.pos) })
-
-        if ( spawns.length === 0 ) {
-            /** 此时, 本进程无用, 释放资源并休眠 */
-            C.release(name)
-            workerName = null
-            return A.proc.STOP_SLEEP
-        }
-
-        if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) <= 0 ) return A.proc.OK
-
-        const spawn = _.min(spawns, s => creep.pos.getRangeTo(s))
-
-        /** 已经接近 Spawn */
-        if ( creep.pos.roomName === roomName && creep.pos.getRangeTo(spawn) <= 1 ) {
-            creep.transfer(spawn, RESOURCE_ENERGY)
-            return A.proc.OK_STOP_CURRENT
-        }
-
-        creep.moveTo(spawn)
-        return A.proc.OK_STOP_CURRENT
-    }
-
-    const gotoSource = getEnergy(roomName, () => workerName, name => workerName = name)
-
-    const pid = A.proc.createProc([
-        () => {
-            if ( !!Game.rooms[roomName] && Game.rooms[roomName].energyAvailable < Game.rooms[roomName].energyCapacityAvailable ) return A.proc.OK
-            else return A.proc.STOP_SLEEP
-        }, 
-        () => C.acquire('worker', roomName, name => workerName = name), 
-        [ 'gotoSource', gotoSource ], 
-        () => gotoSpawn(workerName), 
-        [ 'JUMP', () => true, 'gotoSource' ]
-    ], `${roomName} => Fill`)
-
-    A.proc.trigger('after', Spawn.prototype, 'spawnCreep', (returnValue, spawn: StructureSpawn, ...args) => {
-        if ( returnValue === OK && spawn.pos.roomName === roomName )
-            return [ pid ]
-        return []
-    })
-}
+import { issueLabProc } from './modules/labManage'
+import { issueFillProc } from './modules/normalEnergyFill'
 
 export function registerForRoom() {
     C.design('worker', {
         body: {
             1: [ CARRY, WORK, MOVE ], 
             3: [ CARRY, CARRY, WORK, WORK, MOVE, MOVE ], 
-            5: [ CARRY, CARRY, CARRY, WORK, WORK, WORK, MOVE, MOVE, MOVE ]
+            5: [ CARRY, CARRY, CARRY, WORK, WORK, WORK, MOVE, MOVE, MOVE ], 
+            6: [ CARRY, CARRY, CARRY, CARRY, WORK, WORK, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE ]
         }, 
-        amount: 5, 
+        amount: 3, 
     })
 }
 
@@ -117,6 +58,7 @@ export function issueForRoom(roomName: string) {
     issueFillProc(roomName)
     issueBuildProc(roomName)
     issuePaintProc(roomName)
+    issueLabProc(roomName)
     
     issueHarvestMineral(roomName)
     issueRepairStructure(roomName)

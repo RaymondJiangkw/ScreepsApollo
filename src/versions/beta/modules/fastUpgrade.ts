@@ -95,9 +95,11 @@ function issueUpgradeProc(roomName: string) {
         }
 
         const controller = Game.rooms[roomName].controller
-        if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) return A.proc.OK_STOP_NEXT
+        if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) return A.proc.OK
 
         creep.upgradeController(controller)
+        if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) < calcBodyEffectiveness(creep.body, WORK, 'work', UPGRADE_CONTROLLER_POWER) )
+            return A.proc.OK_STOP_NEXT
         return A.proc.OK_STOP_CURRENT
     }
 
@@ -116,8 +118,11 @@ export function registerFastUpgrade() {
     C.design('weak_upgrader', {
         body: {
             1: [ CARRY, WORK, MOVE ], 
-            2: [ CARRY, CARRY, WORK, WORK, MOVE, MOVE ], 
-            5: [ CARRY, CARRY, CARRY, CARRY, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE ], 
+            2: [ CARRY, CARRY, WORK, WORK, MOVE, MOVE, MOVE, MOVE ], 
+            3: [ CARRY, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE ], 
+            4: [ CARRY, CARRY, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE ], 
+            5: [ CARRY, CARRY, CARRY, CARRY, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE ], 
+            6: [ CARRY, CARRY, CARRY, CARRY, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE ], 
             8: [ CARRY, WORK, MOVE ]
         }, 
         amount: 1
@@ -292,10 +297,10 @@ export function issueFastUpgrade( roomName: string ): (() => Id<StructureLink>)[
     assertWithMsg( room && room.controller && room.controller.my, `无法为非自己控制的房间创建 Upgrade 方法` )
     const sources = Game.rooms[roomName].find(FIND_SOURCES) // 根据 Source 数量决定最快升级数量
     issueUpgradeProc(roomName)
-    if ( controllerUnit.isControllerFit(room.controller.id) ) {
-        issueFastUpgradeProc(roomName, room.controller.id, room.controller.pos, sources.length)
-    } else {
-        log(LOG_ERR, `无法为 ${roomName} 创建迅速升级方法`)
-    }
+    // if ( controllerUnit.isControllerFit(room.controller.id) ) {
+    //     issueFastUpgradeProc(roomName, room.controller.id, room.controller.pos, sources.length)
+    // } else {
+    //     log(LOG_ERR, `无法为 ${roomName} 创建迅速升级方法`)
+    // }
     return []
 }

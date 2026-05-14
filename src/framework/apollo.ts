@@ -1020,14 +1020,17 @@ class ResourceModule {
         const manager = this.#getStructureResourceManager(target)
         const signalId = manager.getSignal(resourceType)
         log(LOG_DEBUG, `${target} 获得资源 ${resourceType} (${amount})`)
-        let oldAmount = Game.getObjectById(target).store[resourceType]
-        if ( resourceType === 'capacity' ) oldAmount = Game.getObjectById(target).store.getFreeCapacity()
-        if ( resourceType === 'capacity_energy' ) oldAmount = Game.getObjectById(target).store.getFreeCapacity(RESOURCE_ENERGY)
-        if ( resourceType === 'capacity_mineral' ) oldAmount = (Game.getObjectById(target) as StructureLab).store.getFreeCapacity((Game.getObjectById(target) as StructureLab).mineralType) || LAB_MINERAL_CAPACITY
-        if ( Game.getObjectById(target) && oldAmount < Apollo.proc.signal.getValue(signalId) + amount ) {
-            log(LOG_ERR, `${Game.getObjectById(target)} 应有 ${Apollo.proc.signal.getValue(signalId) + amount} ${resourceType}, 但是实际上有 ${oldAmount}`)
-            stackError(`${Game.time}: ${Game.getObjectById(target)} 应有 ${Apollo.proc.signal.getValue(signalId) + amount} ${resourceType}, 但是实际上有 ${oldAmount}`)
+        if ( !!Game.getObjectById(target) ) {
+            let oldAmount = Game.getObjectById(target).store[resourceType]
+            if ( resourceType === 'capacity' ) oldAmount = Game.getObjectById(target).store.getFreeCapacity()
+            if ( resourceType === 'capacity_energy' ) oldAmount = Game.getObjectById(target).store.getFreeCapacity(RESOURCE_ENERGY)
+            if ( resourceType === 'capacity_mineral' ) oldAmount = (Game.getObjectById(target) as StructureLab).store.getFreeCapacity((Game.getObjectById(target) as StructureLab).mineralType) || LAB_MINERAL_CAPACITY
+            if ( Game.getObjectById(target) && oldAmount < Apollo.proc.signal.getValue(signalId) + amount ) {
+                log(LOG_ERR, `${Game.getObjectById(target)} 应有 ${Apollo.proc.signal.getValue(signalId) + amount} ${resourceType}, 但是实际上有 ${oldAmount}`)
+                stackError(`${Game.time}: ${Game.getObjectById(target)} 应有 ${Apollo.proc.signal.getValue(signalId) + amount} ${resourceType}, 但是实际上有 ${oldAmount}`)
+            }
         }
+        
         // else stackLog(`${Game.time}: ${Game.getObjectById(target)} 获得 ${amount} ${resourceType}, 应有 ${Apollo.proc.signal.getValue(signalId) + amount}, 实际上有 ${oldAmount}`)
         return Apollo.proc.signal.Ssignal({ signalId, request: amount })
     }

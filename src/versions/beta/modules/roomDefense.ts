@@ -12,7 +12,8 @@ import { Apollo as A } from "@/framework/apollo"
 import { planModule as P } from "@/modules/plan"
 import { creepModule as C } from "@/modules/creep"
 import { transferModule as T } from '@/modules/transfer'
-import { assertWithMsg, calcBodyEffectiveness, findDistanceTo, getFileNameAndLineNumber } from "@/utils"
+import { assertWithMsg, calcBodyEffectiveness, calcTowerAttackHits, findDistanceTo, getFileNameAndLineNumber } from "@/utils"
+import { getStructureMemory } from "@/modules/structureMemory"
 
 export function registerDefendRoom() {
     C.design('defense_healer', {
@@ -50,7 +51,7 @@ function issueRoomTowerDefend(roomName: string) {
             if ( towers.length === 0 ) return [A.proc.STOP_ERR, `${roomName} 房间无可用 Tower`] as [ typeof A.proc.STOP_ERR, string ]
 
             const hostileCreeps = Game.rooms[roomName].find(FIND_HOSTILE_CREEPS)
-            if ( hostileCreeps.length > 0 ) {
+            if ( hostileCreeps.length > 0 && !Game.rooms[roomName].controller.safeMode ) {
                 const hostileCreepsDesc = hostileCreeps.map(creep => {
                     return {creep, hasHeal: _.filter(creep.body, desc => desc.type === HEAL && desc.hits > 0).length > 0, hasAttack: _.filter(creep.body, desc => (desc.type === ATTACK || desc.type === RANGED_ATTACK) && desc.hits > 0).length > 0, range: towers.length > 0 ? towers[0].pos.getRangeTo(creep) : 0 }
                 })
@@ -60,6 +61,12 @@ function issueRoomTowerDefend(roomName: string) {
 
                 // 第一优先: 最近 Healer
                 let targetCreep = creepsWithHeal.length > 0 ? _.min(creepsWithHeal, ({range}) => range).creep : null
+                // 判定是否能构成有效攻击
+                if ( !!targetCreep ) {
+                    const healHits = _.filter(targetCreep.body, desc => desc.type === HEAL && desc.hits > 0).length * HEAL_POWER
+                    const attackHits = _.sum(_.map(towers, tower => calcTowerAttackHits(tower.pos.getRangeTo(targetCreep))))
+                    if ( healHits >= attackHits ) targetCreep = null
+                }
                 // 第二优先: 最近 Attacker
                 if ( !targetCreep ) targetCreep = creepsWithAttack.length > 0 ? _.min(creepsWithAttack, ({range}) => range).creep : null
                 if ( !targetCreep ) targetCreep = hostileCreepsDesc[0].creep
@@ -77,10 +84,15 @@ function issueRoomTowerDefend(roomName: string) {
                 const rampartsCloseToDisappear = Game.rooms[roomName].find(FIND_STRUCTURES).filter(s => s.structureType === STRUCTURE_RAMPART && s.hits <= RAMPART_DECAY_AMOUNT) as StructureRampart[]
                 if ( rampartsCloseToDisappear.length > 0 ) {
                     towers.forEach(tower => {
+                        if ( !!(getStructureMemory(tower.id) as any)._lastRepairTick && (getStructureMemory(tower.id) as any)._lastRepairTick >= Game.time ) return
+
                         if ( A.res.query(tower.id, RESOURCE_ENERGY) >= TOWER_CAPACITY / 2 ) {
                             assertWithMsg( A.res.request({ id: tower.id, resourceType: RESOURCE_ENERGY, amount: TOWER_ENERGY_COST }) === A.proc.OK )
                             A.timer.add(Game.time + 1, id => A.res.signal(id, A.res.CAPACITY_ENERGY, TOWER_ENERGY_COST), [ tower.id ], `更新塔 ${tower.id} 的容量`)
-                            tower.repair(rampartsCloseToDisappear[0])
+
+                            const retCode = tower.repair(rampartsCloseToDisappear[0]);
+                            (getStructureMemory(tower.id) as any)._lastRepairTick = Game.time
+                            assertWithMsg( retCode === OK, `roomDefense L95 -> ${roomName}, ${tower.id}, ${retCode}` )
                         }
                     })
                 }
@@ -193,7 +205,9 @@ function issueRoomAttackHealDefend(roomName: string, safePos: RoomPosition) {
 
             if ( hostileCreeps.length === 0 ) {
                 attacker.say("🚬")
-                attacker.travelTo(attacker.pos, { flee: true, ignoreCreeps: false, offRoad: true, avoidStructureTypes: [ STRUCTURE_CONTAINER, STRUCTURE_ROAD ] })
+                if ( attacker.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 ) {
+                    attacker.travelTo(attacker.pos, { flee: true, ignoreCreeps: false, offRoad: true, avoidStructureTypes: [ STRUCTURE_CONTAINER, STRUCTURE_ROAD ] })
+                }
                 return A.proc.OK_STOP_CURRENT
             }
             
@@ -235,4 +249,10 @@ export function issueDefendProc(roomName: string) {
 
     issueRoomAttackHealDefend(roomName, safePos)
     issueRoomTowerDefend(roomName)
+    A.timer.add(Game.time + 1, (roomName) => {
+        const condition = isDefenseNecessary(roomName)
+        if ( condition && Game.rooms[roomName] && !Game.rooms[roomName].controller.safeMode ) {
+            Game.rooms[roomName].controller.activateSafeMode()
+        }
+    }, [roomName], `检测是否启动 SafeMode`, 1)
 }

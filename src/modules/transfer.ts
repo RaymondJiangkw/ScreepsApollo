@@ -73,6 +73,27 @@ class TransferModule {
             let targetDict: TargetDict = {};
             ((workerName: string, getCurrentTransferTask: () => TransferTaskDescription, setCurrentTransferTack: (v: TransferTaskDescription) => void, targetDict: TargetDict) => {
                 /** 先一次性取完, 再一次性送完 */
+
+                const mergeTask = () => {
+                    // 尝试合并
+                    let find = false
+                    for ( const t of this.#getTaskQueue(roomName).queue ) {
+                        if ( !getCurrentTransferTask().disallowGrouping && t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
+                            for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
+                                const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
+                                if ( !!c ) c.amount += amount
+                                else t.content.push({ resourceType, amount })
+                            }
+                            find = true
+                            break
+                        }
+                    }
+                    if ( !find ) {
+                        insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
+                        A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
+                    }
+                }
+
                 A.proc.createProc([
                     ['start', () => A.proc.signal.Swait({ signalId: this.#getTaskQueue(roomName).lengthSignalId, lowerbound: 1, request: 1 })], 
                     () => {
@@ -92,16 +113,45 @@ class TransferModule {
                             return [A.proc.STOP_ERR, `Creep [${workerName}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
                         }
                         if ( creep.store.getUsedCapacity() === 0 ) return A.proc.OK
-                        for ( const resourceType in creep.store ) {
-                            // Drop 在 Container 上会影响资源计算
-                            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(v => v.structureType === STRUCTURE_CONTAINER).length > 0 ) {
-                                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
-                                return A.proc.OK_STOP_CURRENT
-                            }
-                            creep.drop(resourceType as ResourceConstant)
+
+                        /** 即将消亡, 则逃离原位置 */
+                        if ( creep.ticksToLive < 5 ) {
+                            creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
                             return A.proc.OK_STOP_CURRENT
                         }
 
+                        if ( !!Game.rooms[roomName].storage ) {
+                            if ( creep.pos.getRangeTo(Game.rooms[roomName].storage) > 1 ) {
+                                creep.moveTo(Game.rooms[roomName].storage)
+                                return A.proc.OK_STOP_CURRENT
+                            }
+                            for ( const resourceType in creep.store ) {
+                                if ( A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) >= creep.store[resourceType] ) {
+                                    assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount: creep.store[resourceType] }) === A.proc.OK, getFileNameAndLineNumber() )
+                                    assertWithMsg( creep.transfer(Game.rooms[roomName].storage, resourceType as ResourceConstant) === OK, getFileNameAndLineNumber() )
+                                    A.timer.add(Game.time + 1, (id, resourceType, amount) => A.res.signal(id, resourceType, amount), [ Game.rooms[roomName].storage.id, resourceType, creep.store[resourceType] ], `更新 Storage 资源`)
+                                    return A.proc.OK_STOP_CURRENT
+                                } else {
+                                    // Drop 在 Container 上会影响资源计算
+                                    if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(v => v.structureType === STRUCTURE_CONTAINER).length > 0 ) {
+                                        creep.travelTo( Game.rooms[roomName].storage.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                                        return A.proc.OK_STOP_CURRENT
+                                    }
+                                    creep.drop(resourceType as ResourceConstant)
+                                    return A.proc.OK_STOP_CURRENT
+                                }
+                            }
+                        } else {
+                            for ( const resourceType in creep.store ) {
+                                // Drop 在 Container 上会影响资源计算
+                                if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(v => v.structureType === STRUCTURE_CONTAINER).length > 0 ) {
+                                    creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                                    return A.proc.OK_STOP_CURRENT
+                                }
+                                creep.drop(resourceType as ResourceConstant)
+                                return A.proc.OK_STOP_CURRENT
+                            }
+                        }
                     }, 
                     /** 移动到源 */
                     [ 'moveToSource', () => {
@@ -116,23 +166,7 @@ class TransferModule {
                             // 此时 targetDict 应当为空
                             assertWithMsg( !!getCurrentTransferTask(), `'moveToSource'时 Creep 消失, 应当仍然有任务` )
                             assertWithMsg( Object.keys(targetDict).length === 0, `'moveToSource'时 Creep 消失, 应当不携带任何资源` )
-                            // 尝试合并
-                            let find = false
-                            for ( const t of this.#getTaskQueue(roomName).queue ) {
-                                if ( !getCurrentTransferTask().disallowGrouping && t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
-                                    for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
-                                        const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
-                                        if ( !!c ) c.amount += amount
-                                        else t.content.push({ resourceType, amount })
-                                    }
-                                    find = true
-                                    break
-                                }
-                            }
-                            if ( !find ) {
-                                insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
-                                A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
-                            }
+                            mergeTask()
                             setCurrentTransferTack( null )
                             return [A.proc.STOP_ERR, `Creep [${workerName}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
                         }
@@ -175,23 +209,7 @@ class TransferModule {
                                 }
                             }
                             if ( !getCurrentTransferTask().finishWithdraw ) {
-                                // 尝试合并
-                                let find = false
-                                for ( const t of this.#getTaskQueue(roomName).queue ) {
-                                    if ( !getCurrentTransferTask().disallowGrouping && t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
-                                        for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
-                                            const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
-                                            if ( !!c ) c.amount += amount
-                                            else t.content.push({ resourceType, amount })
-                                        }
-                                        find = true
-                                        break
-                                    }
-                                }
-                                if ( !find ) {
-                                    insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
-                                    A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
-                                }
+                                mergeTask()
                             } else {
                                 if ( getCurrentTransferTask().callback ) A.timer.add(Game.time + 1, getCurrentTransferTask().callback, [], `Transfer 任务完成后执行回调函数`)
                             }
@@ -269,23 +287,7 @@ class TransferModule {
                                 }
                             }
                             if ( !getCurrentTransferTask().finishWithdraw ) {
-                                // 尝试合并
-                                let find = false
-                                for ( const t of this.#getTaskQueue(roomName).queue ) {
-                                    if ( !getCurrentTransferTask().disallowGrouping && t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
-                                        for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
-                                            const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
-                                            if ( !!c ) c.amount += amount
-                                            else t.content.push({ resourceType, amount })
-                                        }
-                                        find = true
-                                        break
-                                    }
-                                }
-                                if ( !find ) {
-                                    insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
-                                    A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
-                                }
+                                mergeTask()
                             } else {
                                 if ( getCurrentTransferTask().callback ) A.timer.add(Game.time + 1, getCurrentTransferTask().callback, [], `Transfer 任务完成后执行回调函数`)
                             }
@@ -337,23 +339,7 @@ class TransferModule {
                         workerName = null
                         targetDict = {}
                         if ( !getCurrentTransferTask().finishWithdraw ) {
-                            // 尝试合并
-                            let find = false
-                            for ( const t of this.#getTaskQueue(roomName).queue ) {
-                                if ( !getCurrentTransferTask().disallowGrouping && t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
-                                    for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
-                                        const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
-                                        if ( !!c ) c.amount += amount
-                                        else t.content.push({ resourceType, amount })
-                                    }
-                                    find = true
-                                    break
-                                }
-                            }
-                            if ( !find ) {
-                                insertSortedBy(this.#getTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
-                                A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(roomName).lengthSignalId, request: 1 })
-                            }
+                            mergeTask()
                         } else {
                             if ( getCurrentTransferTask().callback ) A.timer.add(Game.time + 1, getCurrentTransferTask().callback, [], `Transfer 任务完成后执行回调函数`)
                         }
@@ -361,6 +347,309 @@ class TransferModule {
                         return [ A.proc.OK_STOP_CUSTOM, 'start' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
                     }]
                 ], `${roomName} => Transfer ${idx}`)
+            })(workerName, () => currentTransferTask, v => currentTransferTask = v, targetDict)
+        }
+    }
+    #remoteTaskQueues: { [roomName: string]: {
+        queue: TransferTaskDescription[], 
+        lengthSignalId: string, 
+    } } = {}
+    #getRemoteTaskQueue(roomName: string) {
+        if ( !(roomName in this.#remoteTaskQueues) ) this.#remoteTaskQueues[roomName] = {
+            queue: [], lengthSignalId: A.proc.signal.createSignal(0)
+        }
+        return this.#remoteTaskQueues[roomName]
+    }
+    #issuedRemoteRoomNames: string[] = []
+    #issueRemoteForRoomName(roomName: string) {
+        if ( this.#issuedRemoteRoomNames.includes(roomName) ) return
+        this.#issuedRemoteRoomNames.push(roomName)
+        for ( let idx = 0; idx < this.#MAXIMUM_TRANSFERRING_NUM; ++idx ) {
+            let workerName = null
+            let currentTransferTask: TransferTaskDescription = null
+            type TargetDict = { [resourceType in ResourceConstant]?: number }
+            /** 当前携带的资源 */
+            let targetDict: TargetDict = {};
+            ((workerName: string, getCurrentTransferTask: () => TransferTaskDescription, setCurrentTransferTack: (v: TransferTaskDescription) => void, targetDict: TargetDict) => {
+                /** 先一次性取完, 再一次性送完 */
+
+                /** 重新放回任务 */
+                const mergeTask = () => {
+                    // 尝试合并
+                    let find = false
+                    for ( const t of this.#getRemoteTaskQueue(roomName).queue ) {
+                        if ( !getCurrentTransferTask().disallowGrouping && t.fromId === getCurrentTransferTask().fromId && t.toId === getCurrentTransferTask().toId && t.priority === getCurrentTransferTask().priority && t.afterSignalId === getCurrentTransferTask().afterSignalId && ( getCurrentTransferTask().allowLooseGrouping || (t.loseCallback === getCurrentTransferTask().loseCallback && t.callback === getCurrentTransferTask().callback) ) ) {
+                            for ( const { resourceType, amount } of getCurrentTransferTask().content ) {
+                                const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
+                                if ( !!c ) c.amount += amount
+                                else t.content.push({ resourceType, amount })
+                            }
+                            find = true
+                            break
+                        }
+                    }
+                    if ( !find ) {
+                        insertSortedBy(this.#getRemoteTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
+                        A.proc.signal.Ssignal({ signalId: this.#getRemoteTaskQueue(roomName).lengthSignalId, request: 1 })
+                    }
+                }
+
+                A.proc.createProc([
+                    ['start', () => A.proc.signal.Swait({ signalId: this.#getRemoteTaskQueue(roomName).lengthSignalId, lowerbound: 1, request: 1 })], 
+                    () => {
+                        setCurrentTransferTack(this.#getRemoteTaskQueue(roomName).queue.shift())
+                        return A.proc.OK
+                    }, 
+                    () => C.acquire('remote_transferer', roomName, name => workerName = name), 
+                    () => {
+                        const creep = Game.creeps[workerName]
+                        if ( !creep || creep.hits < creep.hitsMax ) {
+                            C.cancel(workerName)
+                            workerName = null
+
+                            insertSortedBy(this.#getRemoteTaskQueue(roomName).queue, getCurrentTransferTask(), 'priority')
+                            A.proc.signal.Ssignal({ signalId: this.#getRemoteTaskQueue(roomName).lengthSignalId, request: 1 })
+                            setCurrentTransferTack(null)
+                            return [A.proc.STOP_ERR, `Creep [${workerName}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
+                        }
+                        if ( creep.store.getUsedCapacity() === 0 ) return A.proc.OK
+
+                        /** 即将消亡, 则逃离原位置 */
+                        if ( creep.ticksToLive < 5 ) {
+                            creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                            return A.proc.OK_STOP_CURRENT
+                        }
+
+                        if ( !!Game.rooms[roomName].storage ) {
+                            if ( creep.pos.roomName !== roomName || creep.pos.getRangeTo(Game.rooms[roomName].storage) > 1 ) {
+                                creep.moveTo(Game.rooms[roomName].storage)
+                                return A.proc.OK_STOP_CURRENT
+                            }
+                            for ( const resourceType in creep.store ) {
+                                if ( A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) >= creep.store[resourceType] ) {
+                                    assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount: creep.store[resourceType] }) === A.proc.OK, getFileNameAndLineNumber() )
+                                    assertWithMsg( creep.transfer(Game.rooms[roomName].storage, resourceType as ResourceConstant) === OK, getFileNameAndLineNumber() )
+                                    A.timer.add(Game.time + 1, (id, resourceType, amount) => A.res.signal(id, resourceType, amount), [ Game.rooms[roomName].storage.id, resourceType, creep.store[resourceType] ], `更新 Storage 资源`)
+                                    return A.proc.OK_STOP_CURRENT
+                                } else {
+                                    // Drop 在 Container 上会影响资源计算
+                                    if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(v => v.structureType === STRUCTURE_CONTAINER).length > 0 ) {
+                                        creep.travelTo( Game.rooms[roomName].storage.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                                        return A.proc.OK_STOP_CURRENT
+                                    }
+                                    creep.drop(resourceType as ResourceConstant)
+                                    return A.proc.OK_STOP_CURRENT
+                                }
+                            }
+                        } else {
+                            for ( const resourceType in creep.store ) {
+                                // Drop 在 Container 上会影响资源计算
+                                if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(v => v.structureType === STRUCTURE_CONTAINER).length > 0 ) {
+                                    creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                                    return A.proc.OK_STOP_CURRENT
+                                }
+                                creep.drop(resourceType as ResourceConstant)
+                                return A.proc.OK_STOP_CURRENT
+                            }
+                        }
+                    }, 
+                    /** 移动到源 */
+                    [ 'moveToSource', () => {
+                        const creep = Game.creeps[workerName]
+                        /** 检测到错误, 立即释放资源 */
+                        if ( !creep || creep.hits < creep.hitsMax ) {
+                            // 释放 Creep
+                            C.cancel(workerName)
+                            workerName = null
+                            // 恢复任务, 不用恢复 `from` 的资源, 因为运输一定完成
+                            // 相应的资源一定被消耗
+                            // 此时 targetDict 应当为空
+                            assertWithMsg( !!getCurrentTransferTask(), `'moveToSource'时 Creep 消失, 应当仍然有任务` )
+                            assertWithMsg( Object.keys(targetDict).length === 0, `'moveToSource'时 Creep 消失, 应当不携带任何资源` )
+                            mergeTask()
+                            setCurrentTransferTack( null )
+                            return [A.proc.STOP_ERR, `Creep [${workerName}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
+                        }
+
+                        if ( creep.pos.roomName !== getCurrentTransferTask().fromPos.roomName || creep.pos.getRangeTo(getCurrentTransferTask().fromPos.x, getCurrentTransferTask().fromPos.y) > 1 ) {
+                            creep.moveTo(new RoomPosition(getCurrentTransferTask().fromPos.x, getCurrentTransferTask().fromPos.y, getCurrentTransferTask().fromPos.roomName))
+                            return A.proc.OK_STOP_CURRENT
+                        }
+                        // 检验 afterSignal
+                        if ( !getCurrentTransferTask().afterSignalId ) return [ A.proc.OK_STOP_CUSTOM, 'withdraw' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+                        return A.proc.OK
+                    }], 
+                    () => {
+                        /** 等待另一个信号量完成 */
+                        const ret = A.proc.signal.Swait({ signalId: getCurrentTransferTask().afterSignalId, lowerbound: 1, request: 0 })
+                        if ( ret === A.proc.OK ) {
+                            A.proc.signal.destroySignal( getCurrentTransferTask().afterSignalId )
+                            getCurrentTransferTask().afterSignalId = undefined
+                        }
+                        return ret
+                    }, 
+                    [ 'withdraw', () => {
+                        const creep = Game.creeps[workerName]
+                        /** 检测到错误, 立即释放资源 */
+                        if ( !creep || creep.hits < creep.hitsMax ) {
+                            // || creep.ticksToLive < 3
+                            // if ( creep ) creep.suicide()
+                            // 释放 Creep
+                            C.cancel(workerName)
+                            workerName = null
+                            // 恢复任务
+                            // 永久丢失的资源
+                            for ( const resourceType in targetDict ) {
+                                if ( getCurrentTransferTask().loseCallback )
+                                    getCurrentTransferTask().loseCallback(targetDict[resourceType], resourceType as ResourceConstant)
+                                const to = Game.getObjectById(getCurrentTransferTask().toId)
+                                if ( !!to ) {
+                                    // 腾出空间
+                                    assertWithMsg( A.res.signal(to.id, A.res.describeCapacity(to, resourceType as ResourceConstant), targetDict[resourceType]) === A.proc.OK, getFileNameAndLineNumber() )
+                                }
+                            }
+                            if ( !getCurrentTransferTask().finishWithdraw ) {
+                                mergeTask()
+                            } else {
+                                if ( getCurrentTransferTask().callback ) A.timer.add(Game.time + 1, getCurrentTransferTask().callback, [], `Transfer 任务完成后执行回调函数`)
+                            }
+                            
+                            targetDict = {}
+                            setCurrentTransferTack( null )
+                            return [A.proc.STOP_ERR, `Creep [${workerName}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
+                        }
+                        
+                        // 在最后一秒 withdraw 或 transfer 会返回成功, 但是不会执行
+                        /** 即将消亡, 则逃离原位置 */
+                        if ( creep.ticksToLive < 5 ) {
+                            creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                            return A.proc.OK_STOP_CURRENT
+                        }
+
+                        assertWithMsg( creep.store.getFreeCapacity() > 0, getFileNameAndLineNumber() )
+                        assertWithMsg( !!getCurrentTransferTask().fromId, `源 Id 未定时, 尚未实现` )
+
+                        if ( creep.pos.roomName !== getCurrentTransferTask().fromPos.roomName || creep.pos.getRangeTo(getCurrentTransferTask().fromPos.x, getCurrentTransferTask().fromPos.y) > 1) {
+                            creep.moveTo(new RoomPosition(getCurrentTransferTask().fromPos.x, getCurrentTransferTask().fromPos.y, getCurrentTransferTask().fromPos.roomName))
+                            return A.proc.OK_STOP_CURRENT
+                        }
+
+                        const source = Game.getObjectById(getCurrentTransferTask().fromId)
+                        if ( !source ) {
+                            const to = Game.getObjectById(getCurrentTransferTask().toId)
+                            if ( !!to ) {
+                                for ( const { resourceType, amount } of getCurrentTransferTask().content )
+                                    assertWithMsg( A.res.signal(getCurrentTransferTask().toId, A.res.describeCapacity(to, resourceType), amount) === A.proc.OK, getFileNameAndLineNumber() )
+                                if ( Object.keys(targetDict).length > 0 )
+                                    return [ A.proc.OK_STOP_CUSTOM, 'moveToTarget' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+                            }
+                            targetDict = {}
+                            setCurrentTransferTack( null )
+                            return [ A.proc.OK_STOP_CUSTOM, 'start' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+                        }
+
+                        if ( creep.pos.getRangeTo(source) > 1 ) {
+                            creep.moveTo(source)
+                            return A.proc.OK_STOP_CURRENT
+                        }
+
+                        /** 确定运输的种类和数量 & 确定是否运输完成 */
+                        let resourceType = getCurrentTransferTask().content[0].resourceType
+                        let prevCapacity = creep.store.getFreeCapacity()
+                        let amount = Math.min(prevCapacity, getCurrentTransferTask().content[0].amount)
+                        assertWithMsg( amount >= 0 && amount <= (source.store[resourceType] || 0), `取资源时, ${source} 应至少有 ${amount} ${resourceType} 但只有 ${source.store[resourceType] || 0}.` )
+                        assertWithMsg( creep.withdraw(source, resourceType, amount) === OK, getFileNameAndLineNumber() + `(${creep.pos}, ${source.pos}, ${resourceType}, ${amount}, ${prevCapacity}, ${source.store[resourceType]})` )
+                        A.timer.add(Game.time + 1, (sourceId, capacityType, amount) => A.res.signal(sourceId, capacityType, amount), [source.id, A.res.describeCapacity(source, resourceType), amount], `取资源后, 更新源建筑的容量`)
+
+                        getCurrentTransferTask().content[0].amount -= amount
+                        targetDict[resourceType] = ( targetDict[resourceType] || 0 ) + amount
+                        if ( getCurrentTransferTask().content[0].amount === 0 ) {
+                            getCurrentTransferTask().content.shift()
+                            getCurrentTransferTask().finishWithdraw = getCurrentTransferTask().content.length === 0
+                        }
+
+                        if ( getCurrentTransferTask().finishWithdraw || prevCapacity === amount ) return A.proc.OK_STOP_NEXT
+                        else return A.proc.OK_STOP_CURRENT
+                    } ], 
+                    ['moveToTarget', () => {
+                        const creep = Game.creeps[workerName]
+                        /** 检测到错误, 立即释放资源 */
+                        if ( !creep || creep.hits < creep.hitsMax ) {
+                            // || creep.ticksToLive < 3
+                            // if ( creep ) creep.suicide()
+                            // 释放 Creep
+                            C.cancel(workerName)
+                            workerName = null
+                            // 恢复任务
+                            // 永久丢失的资源
+                            for ( const resourceType in targetDict ) {
+                                if ( getCurrentTransferTask().loseCallback )
+                                    getCurrentTransferTask().loseCallback(targetDict[resourceType], resourceType as ResourceConstant)
+                                const to = Game.getObjectById(getCurrentTransferTask().toId)
+                                if ( !!to ) {
+                                    // 腾出空间
+                                    assertWithMsg( A.res.signal(to.id, A.res.describeCapacity(to, resourceType as ResourceConstant), targetDict[resourceType]) === A.proc.OK, getFileNameAndLineNumber() )
+                                }
+                            }
+                            if ( !getCurrentTransferTask().finishWithdraw ) {
+                                mergeTask()
+                            } else {
+                                if ( getCurrentTransferTask().callback ) A.timer.add(Game.time + 1, getCurrentTransferTask().callback, [], `Transfer 任务完成后执行回调函数`)
+                            }
+                            
+                            targetDict = {}
+                            setCurrentTransferTack( null )
+                            return [A.proc.STOP_ERR, `Creep [${workerName}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
+                        }
+                        
+                        // 在最后一秒 withdraw 或 transfer 会返回成功, 但是不会执行
+                        if ( creep.ticksToLive < 5 ) {
+                            creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                            return A.proc.OK_STOP_CURRENT
+                        }
+
+                        if ( creep.pos.roomName !== getCurrentTransferTask().toPos.roomName || creep.pos.getRangeTo(getCurrentTransferTask().toPos.x, getCurrentTransferTask().toPos.y) > 1) {
+                            creep.moveTo(new RoomPosition(getCurrentTransferTask().toPos.x, getCurrentTransferTask().toPos.y, getCurrentTransferTask().toPos.roomName))
+                            return A.proc.OK_STOP_CURRENT
+                        }
+
+                        const target = Game.getObjectById(getCurrentTransferTask().toId)
+                        if ( !target ) {
+                            for ( const { resourceType, amount } of getCurrentTransferTask().content )
+                                assertWithMsg( A.res.signal(getCurrentTransferTask().fromId, resourceType, amount) === A.proc.OK, getFileNameAndLineNumber() )
+                            
+                            targetDict = {}
+                            setCurrentTransferTack( null )
+                            return [ A.proc.OK_STOP_CUSTOM, 'start' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+                        }
+
+                        if ( creep.pos.getRangeTo(target) > 1 ) {
+                            creep.moveTo(target)
+                            return A.proc.OK_STOP_CURRENT
+                        }
+
+                        const resourceType = Object.keys(targetDict)[0] as ResourceConstant
+                        const amount = targetDict[resourceType]
+                        assertWithMsg( amount <= creep.store[resourceType] && amount <= target.store.getFreeCapacity(resourceType), `transfer -> 242 ${amount}` )
+                        assertWithMsg( creep.transfer(target, resourceType, amount) === OK )
+                        A.timer.add(Game.time + 1, (targetId, resourceType, amount) => A.res.signal(targetId, resourceType, amount), [target.id, resourceType, amount], `转移资源后, 更新目标建筑相应资源的数量`)
+                        delete targetDict[resourceType]
+
+                        if ( Object.keys(targetDict).length > 0 ) return A.proc.OK_STOP_CURRENT
+                        
+                        // 归还, 以留空间给更高优先级的任务
+                        C.release(workerName)
+                        workerName = null
+                        targetDict = {}
+                        if ( !getCurrentTransferTask().finishWithdraw ) {
+                            mergeTask()
+                        } else {
+                            if ( getCurrentTransferTask().callback ) A.timer.add(Game.time + 1, getCurrentTransferTask().callback, [], `Transfer 任务完成后执行回调函数`)
+                        }
+                        setCurrentTransferTack( null )
+                        return [ A.proc.OK_STOP_CUSTOM, 'start' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+                    }]
+                ], `${roomName} => Remote Transfer ${idx}`)
             })(workerName, () => currentTransferTask, v => currentTransferTask = v, targetDict)
         }
     }
@@ -386,62 +675,61 @@ class TransferModule {
         assertWithMsg( !!to.id, `传输模块中, 目的地的 Id 必须给定` )
         assertWithMsg( !!from.pos && !!to.pos, `传输模块中, 必须给定从哪儿来和到哪儿去的位置` )
 
-        if ( from.pos.roomName === to.pos.roomName ) {
+        /** 校验参数 */
+        assertWithMsg( !!from.id, `传输模块中, 在控制房间内运输时, Id 必须全部指定` )
+        const taskDescription: TransferTaskDescription = {
+            fromId: from.id, fromPos: from.pos, 
+            toId: to.id, toPos: to.pos, 
+            content: [ { resourceType, amount } ], 
+            priority: opts.priority, afterSignalId: opts.afterSignalId, 
+            loseCallback: opts.loseCallback, 
+            callback: opts.callback, 
+            finishWithdraw: false, id: generate_random_hex(8), 
+            allowLooseGrouping: opts.allowLooseGrouping, 
+            disallowGrouping: opts.disallowGrouping
+        }
+        log(LOG_DEBUG, `运输任务 从 ${from.id} 到 ${to.id} 运输 ${resourceType} (${amount})`)
+        // 判定 TakeOver
+        const queueIds = Object.keys(this.#takeOverInfo).filter(key => this.#takeOverInfo[key].fromIds.includes((from as any).id) && this.#takeOverInfo[key].toIds.includes((to as any).id))
+
+        if ( queueIds.length > 0 ) {
+            queueIds.forEach(queueId => {
+                // 尝试合并
+                let find = false
+                for ( const t of this.#takeOverInfo[queueId].queue ) {
+                    if ( !taskDescription.disallowGrouping && t.fromId === taskDescription.fromId && t.toId === taskDescription.toId && t.priority === taskDescription.priority && t.afterSignalId === taskDescription.afterSignalId && ( opts.allowLooseGrouping || (t.loseCallback === taskDescription.loseCallback && t.callback === taskDescription.callback) ) ) {
+                        const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
+                        if ( !!c ) c.amount += amount
+                        else t.content.push({ resourceType, amount })
+                        find = true
+                        break
+                    }
+                }
+                if ( !find ) {
+                    insertSortedBy(this.#takeOverInfo[queueId].queue, taskDescription, 'priority')
+                    A.proc.signal.Ssignal({ signalId: this.#takeOverInfo[queueId].lengthSignalId, request: 1 })
+                }
+            })
+        } else if ( from.pos.roomName === to.pos.roomName ) {
             if ( Game.rooms[from.pos.roomName] && Game.rooms[from.pos.roomName].controller && Game.rooms[from.pos.roomName].controller.my ) {
                 // 控制房间内运输
-                /** 校验参数 */
-                assertWithMsg( !!from.id, `传输模块中, 在控制房间内运输时, Id 必须全部指定` )
-                const taskDescription: TransferTaskDescription = {
-                    fromId: from.id, fromPos: from.pos, 
-                    toId: to.id, toPos: to.pos, 
-                    content: [ { resourceType, amount } ], 
-                    priority: opts.priority, afterSignalId: opts.afterSignalId, 
-                    loseCallback: opts.loseCallback, 
-                    callback: opts.callback, 
-                    finishWithdraw: false, id: generate_random_hex(8), 
-                    allowLooseGrouping: opts.allowLooseGrouping, 
-                    disallowGrouping: opts.disallowGrouping
+                // 尝试合并
+                let find = false
+                for ( const t of this.#getTaskQueue(from.pos.roomName).queue ) {
+                    if ( !taskDescription.disallowGrouping && t.fromId === taskDescription.fromId && t.toId === taskDescription.toId && t.priority === taskDescription.priority && t.afterSignalId === taskDescription.afterSignalId && ( opts.allowLooseGrouping || (t.loseCallback === taskDescription.loseCallback && t.callback === taskDescription.callback) ) ) {
+                        const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
+                        if ( !!c ) c.amount += amount
+                        else t.content.push({ resourceType, amount })
+                        find = true
+                        break
+                    }
+                    // log(LOG_DEBUG, `无法合并 ${JSON.stringify(taskDescription)} 和 ${JSON.stringify(t)}.`)
                 }
-                log(LOG_DEBUG, `运输任务 从 ${from.id} 到 ${to.id} 运输 ${resourceType} (${amount})`)
-                // 判定 TakeOver
-                const queueIds = Object.keys(this.#takeOverInfo).filter(key => this.#takeOverInfo[key].fromIds.includes((from as any).id) && this.#takeOverInfo[key].toIds.includes((to as any).id))
-                if ( queueIds.length > 0 )
-                    queueIds.forEach(queueId => {
-                        // 尝试合并
-                        let find = false
-                        for ( const t of this.#takeOverInfo[queueId].queue ) {
-                            if ( !taskDescription.disallowGrouping && t.fromId === taskDescription.fromId && t.toId === taskDescription.toId && t.priority === taskDescription.priority && t.afterSignalId === taskDescription.afterSignalId && ( opts.allowLooseGrouping || (t.loseCallback === taskDescription.loseCallback && t.callback === taskDescription.callback) ) ) {
-                                const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
-                                if ( !!c ) c.amount += amount
-                                else t.content.push({ resourceType, amount })
-                                find = true
-                                break
-                            }
-                        }
-                        if ( !find ) {
-                            insertSortedBy(this.#takeOverInfo[queueId].queue, taskDescription, 'priority')
-                            A.proc.signal.Ssignal({ signalId: this.#takeOverInfo[queueId].lengthSignalId, request: 1 })
-                        }
-                    })
-                else {
-                    // 尝试合并
-                    let find = false
-                    for ( const t of this.#getTaskQueue(from.pos.roomName).queue ) {
-                        if ( !taskDescription.disallowGrouping && t.fromId === taskDescription.fromId && t.toId === taskDescription.toId && t.priority === taskDescription.priority && t.afterSignalId === taskDescription.afterSignalId && ( opts.allowLooseGrouping || (t.loseCallback === taskDescription.loseCallback && t.callback === taskDescription.callback) ) ) {
-                            const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
-                            if ( !!c ) c.amount += amount
-                            else t.content.push({ resourceType, amount })
-                            find = true
-                            break
-                        }
-                        // log(LOG_DEBUG, `无法合并 ${JSON.stringify(taskDescription)} 和 ${JSON.stringify(t)}.`)
-                    }
-                    if ( !find ) {
-                        insertSortedBy(this.#getTaskQueue(from.pos.roomName).queue, taskDescription, 'priority')
-                        A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(from.pos.roomName).lengthSignalId, request: 1 })
-                        // 检验房间发出运输进程
-                        this.#issueForRoomName(from.pos.roomName)
-                    }
+                if ( !find ) {
+                    insertSortedBy(this.#getTaskQueue(from.pos.roomName).queue, taskDescription, 'priority')
+                    A.proc.signal.Ssignal({ signalId: this.#getTaskQueue(from.pos.roomName).lengthSignalId, request: 1 })
+                    // 检验房间发出运输进程
+                    this.#issueForRoomName(from.pos.roomName)
                 }
             } else {
                 // 非控制房间内运输暂未实现
@@ -449,7 +737,51 @@ class TransferModule {
             }
         } else {
             // 跨房间运输
-            raiseNotImplementedError()
+            // 若源房间是自己的, 则由源房间承运
+            if ( !!Game.rooms[from.pos.roomName] && !!Game.rooms[from.pos.roomName].controller && Game.rooms[from.pos.roomName].controller.my ) {
+                assertWithMsg( !!Game.rooms[to.pos.roomName] && !!Game.rooms[to.pos.roomName].controller && Game.rooms[to.pos.roomName].controller.my, `跨房间运输时, to 房间必须得是自己的` )
+                // 尝试合并
+                let find = false
+                for ( const t of this.#getRemoteTaskQueue(from.pos.roomName).queue ) {
+                    if ( !taskDescription.disallowGrouping && t.fromId === taskDescription.fromId && t.toId === taskDescription.toId && t.priority === taskDescription.priority && t.afterSignalId === taskDescription.afterSignalId && ( opts.allowLooseGrouping || (t.loseCallback === taskDescription.loseCallback && t.callback === taskDescription.callback) ) ) {
+                        const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
+                        if ( !!c ) c.amount += amount
+                        else t.content.push({ resourceType, amount })
+                        find = true
+                        break
+                    }
+                    // log(LOG_DEBUG, `无法合并 ${JSON.stringify(taskDescription)} 和 ${JSON.stringify(t)}.`)
+                }
+                if ( !find ) {
+                    insertSortedBy(this.#getRemoteTaskQueue(from.pos.roomName).queue, taskDescription, 'priority')
+                    A.proc.signal.Ssignal({ signalId: this.#getRemoteTaskQueue(from.pos.roomName).lengthSignalId, request: 1 })
+                    // 检验房间发出运输进程
+                    this.#issueRemoteForRoomName(from.pos.roomName)
+                }
+            } else if ( !!Game.rooms[to.pos.roomName] && !!Game.rooms[to.pos.roomName].controller && Game.rooms[to.pos.roomName].controller.my ) {
+                // 否则由去房间承运
+                // 尝试合并
+                let find = false
+                for ( const t of this.#getRemoteTaskQueue(to.pos.roomName).queue ) {
+                    if ( !taskDescription.disallowGrouping && t.fromId === taskDescription.fromId && t.toId === taskDescription.toId && t.priority === taskDescription.priority && t.afterSignalId === taskDescription.afterSignalId && ( opts.allowLooseGrouping || (t.loseCallback === taskDescription.loseCallback && t.callback === taskDescription.callback) ) ) {
+                        const c = _.filter(t.content, v => v.resourceType === resourceType)[0]
+                        if ( !!c ) c.amount += amount
+                        else t.content.push({ resourceType, amount })
+                        find = true
+                        break
+                    }
+                    // log(LOG_DEBUG, `无法合并 ${JSON.stringify(taskDescription)} 和 ${JSON.stringify(t)}.`)
+                }
+                if ( !find ) {
+                    insertSortedBy(this.#getRemoteTaskQueue(to.pos.roomName).queue, taskDescription, 'priority')
+                    A.proc.signal.Ssignal({ signalId: this.#getRemoteTaskQueue(to.pos.roomName).lengthSignalId, request: 1 })
+                    // 检验房间发出运输进程
+                    this.#issueRemoteForRoomName(to.pos.roomName)
+                }
+            } else {
+                // 非控制房间间运输暂未实现
+                raiseNotImplementedError()
+            }
         }
     }
     print( roomName: string ) {
@@ -506,6 +838,19 @@ class TransferModule {
                 5: [ MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ], 
                 6: [ MOVE, MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ], 
                 7: [ MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ], 
+            }, 
+            amount: this.#MAXIMUM_TRANSFERRING_NUM
+        })
+
+        C.design('remote_transferer', {
+            body: {
+                1: [ MOVE, CARRY ], 
+                2: [ MOVE, MOVE, CARRY, CARRY ], 
+                3: [ MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY ], 
+                4: [ MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ], 
+                5: [ MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ], 
+                6: [ MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ], 
+                7: [ MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY ], 
             }, 
             amount: this.#MAXIMUM_TRANSFERRING_NUM
         })

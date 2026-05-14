@@ -355,7 +355,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos) {
         }
 
         const amount = Math.min(creep.store.getFreeCapacity(), task.remainingAmount, fromTarget.store[RESOURCE_ENERGY])
-        assertWithMsg( amount > 0, `${creep.store.getFreeCapacity()}, ${task.remainingAmount}, ${fromTarget.store[RESOURCE_ENERGY]}` )
+        assertWithMsg( amount > 0, `quickEnergyFill, ${roomName}, ${creep.store.getFreeCapacity()}, ${task.remainingAmount}, ${fromTarget.store[RESOURCE_ENERGY]}` )
         const retCode = creep.withdraw(fromTarget, RESOURCE_ENERGY, amount)
         assertWithMsg( retCode === OK, `quickEnergyFill -> L359 ${retCode}` )
         if ( fromTarget instanceof StructureContainer || fromTarget instanceof StructureLink )
@@ -399,7 +399,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos) {
 
         if ( toTarget.store.getFreeCapacity(RESOURCE_ENERGY) > 0 ) {
             const amount = Math.min(task.currentAmount, toTarget.store.getFreeCapacity(RESOURCE_ENERGY))
-            assertWithMsg( creep.transfer(toTarget, RESOURCE_ENERGY, amount) === OK, `quickEnergyFill -> 412` )
+            assertWithMsg( creep.transfer(toTarget, RESOURCE_ENERGY, amount) === OK, `quickEnergyFill -> 412 (${roomName}) ${creep.store[RESOURCE_ENERGY]}, ${task.currentAmount}, ${toTarget.store.getFreeCapacity(RESOURCE_ENERGY)}` )
             if ( toTarget instanceof StructureContainer )
                 A.timer.add(Game.time + 1, (id, amount) => A.res.signal(id, RESOURCE_ENERGY, amount), [task.toId, amount], `${task.toId} 能量资源更新`)
             else

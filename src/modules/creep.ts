@@ -176,6 +176,7 @@ class CreepModule {
 
         // 从忙碌队列中删去
         _.pull(repo.busy, name)
+        repo.spawning += 1
         let addedBack = false
         // 移动 creep 到空闲位置
         A.timer.add(Game.time + 1, creepName => {
@@ -184,6 +185,7 @@ class CreepModule {
             if ( !addedBack ) {
                 addedBack = true
                 repo.ready.push(name)
+                repo.spawning -= 1
                 // 更新信号量
                 A.proc.signal.Ssignal({ signalId: repo.signalId, request: 1 })
             }

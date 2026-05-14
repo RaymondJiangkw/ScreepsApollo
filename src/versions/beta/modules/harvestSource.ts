@@ -160,6 +160,10 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
                     buildPos = linkPos
                     // 此时 harvestor 不再将能量放入 container, 所以需要 remove
                     A.res.removeSource(roomName, RESOURCE_ENERGY, info()[STRUCTURE_CONTAINER].id)
+                    if ( !!Game.getObjectById(info()[STRUCTURE_CONTAINER].id) ) {
+                        Game.getObjectById(info()[STRUCTURE_CONTAINER].id).destroy()
+                        info()[STRUCTURE_CONTAINER].id = null
+                    }
                     return [ A.proc.OK_STOP_CUSTOM, 'buildLinkOrContainer' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
                 }
             }
@@ -206,7 +210,8 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
         }
 
         // -> 修理 Container
-        if ( info()[STRUCTURE_CONTAINER].id && Game.getObjectById(info()[STRUCTURE_CONTAINER].id).hits < Game.getObjectById(info()[STRUCTURE_CONTAINER].id).hitsMax ) {
+        if ( info()[STRUCTURE_CONTAINER].id && Game.getObjectById(info()[STRUCTURE_CONTAINER].id).hits < Game.getObjectById(info()[STRUCTURE_CONTAINER].id).hitsMax && Game.rooms[roomName].controller.level < 6 ) {
+            // >= 6 时, 由 tower 修理了
             repairPos = containerPos
             return [ A.proc.OK_STOP_CUSTOM, 'repairLinkOrContainer' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
         }

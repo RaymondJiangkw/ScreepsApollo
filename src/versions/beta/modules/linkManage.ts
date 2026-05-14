@@ -15,6 +15,8 @@ interface TransitLinkInfo {
     send: (amount: number, target: Id<StructureLink>, callback: () => void) => void
 }
 
+import { getTransferUnit, transferModule as T } from "@/modules/transfer"
+
 const MIN_SEND_AMOUNT = 700
 const MIN_RECV_AMOUNT = 100
 
@@ -37,6 +39,13 @@ export function issueLinkManage( roomName: string, senderLinkIdGetters: (() => I
             const transitLink = Game.getObjectById(transitLinkInfo.getId())
             if ( !transitLink ) return [ A.proc.STOP_ERR, `TransitLink 无法找到!` ] as [ typeof A.proc.STOP_ERR, string ]
             if ( transitLink.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) return [ A.proc.OK_STOP_CUSTOM, 'work' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+            if ( !!Game.rooms[roomName].storage && A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) >= transitLink.store.getUsedCapacity(RESOURCE_ENERGY) ) {
+                const amount = transitLink.store.getUsedCapacity(RESOURCE_ENERGY)
+                assertWithMsg( A.res.request({ id: transitLink.id, resourceType: RESOURCE_ENERGY, amount }) === A.proc.OK, getFileNameAndLineNumber() )
+                assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount }) === A.proc.OK, getFileNameAndLineNumber() )
+                T.transfer(transitLink.id, Game.rooms[roomName].storage.id, RESOURCE_ENERGY, amount)
+                return [ A.proc.OK_STOP_CUSTOM, 'isClean' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+            }
             return A.proc.OK
         }, 
         () => C.acquire('cleaner', roomName, name => cleanerName = name), 
@@ -72,6 +81,11 @@ export function issueLinkManage( roomName: string, senderLinkIdGetters: (() => I
             cleanerName = null
             return A.proc.OK
         }, 
+        ['isClean', () => {
+            const transitLink = Game.getObjectById(transitLinkInfo.getId())
+            if ( !transitLink ) return [ A.proc.STOP_ERR, `TransitLink 无法找到!` ] as [ typeof A.proc.STOP_ERR, string ]
+            return A.res.request({ id: transitLink.id, resourceType: A.res.CAPACITY_ENERGY, amount: { lowerbound: LINK_CAPACITY, request: 0 } })
+        }],
         ['work', () => {
             const transitLink = Game.getObjectById(transitLinkInfo.getId())
             if ( !transitLink ) return [ A.proc.STOP_ERR, `TransitLink 无法找到!` ] as [ typeof A.proc.STOP_ERR, string ]

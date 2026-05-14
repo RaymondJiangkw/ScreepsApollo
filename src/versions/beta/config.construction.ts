@@ -46,12 +46,12 @@ export function registerCommonConstructions() {
         [ Unit.STRUCTURE_ANY, Unit.STRUCTURE_ANY,                           Unit.STRUCTURE_ANY,                     Unit.STRUCTURE_ANY,                         Unit.STRUCTURE_ANY ]
     ], {
         'transferStructures': [ [1, 1], [1, 2], [1, 3], [2, 1], [2, 3], [3, 1], [3, 2] ], 
-        'terminal': [ [1, 2] ], 
+        'terminal': [ [2, 1] ], 
         'storage': [ [1, 1] ], 
-        'nuker': [ [2, 1] ], 
-        'powerSpawn': [ [3, 1] ], 
-        'transferLink': [ [1, 3] ], 
-        'factory': [ [2, 3] ]
+        'nuker': [ [1, 2] ], 
+        'powerSpawn': [ [1, 3] ], 
+        'transferLink': [ [3, 1] ], 
+        'factory': [ [3, 2] ]
     }), { distanceReferencesFrom: [ STRUCTURE_STORAGE ], distanceReferencesTo: [ STRUCTURE_CONTROLLER, STRUCTURE_SPAWN ], awayRelationship: [ 'sources', 'mineral', STRUCTURE_CONTROLLER ] })
 
     P.register('road', 'centralSpawn => centralTransfer', 'centralSpawn', 'centralTransfer')
@@ -76,7 +76,19 @@ export function registerCommonConstructions() {
         [[STRUCTURE_LAB, STRUCTURE_RAMPART],    STRUCTURE_ROAD,                         [STRUCTURE_LAB, STRUCTURE_RAMPART],     [STRUCTURE_LAB, STRUCTURE_RAMPART]],
         [STRUCTURE_ROAD,                        [STRUCTURE_LAB, STRUCTURE_RAMPART],     [STRUCTURE_LAB, STRUCTURE_RAMPART],     Unit.STRUCTURE_ANY]
     ], {
-        'coreLabs': [ [1, 1], [2, 2] ]
+        'subLab0': [ [0, 1] ], 
+        'subLab1': [ [0, 2] ], 
+        'subLab2': [ [1, 0] ], 
+        'subLab3': [ [2, 0] ], 
+        'coreLab0': [ [1, 1] ], 
+        'coreLab1': [ [2, 2] ], 
+        'subLab4': [ [1, 3] ], 
+        'subLab5': [ [2, 3] ], 
+        'subLab6': [ [3, 1] ], 
+        'subLab7': [ [3, 2] ], 
+        'subLabs': [ [1, 0], [2, 0], [0, 1], [0, 2], [3, 1], [3, 2], [1, 3], [2, 3] ], 
+        '_priorityBuilt': [ [1, 1], [2, 2] ], 
+        '__priorityBuilt': [ [1, 1], [2, 2] ]
     }), { distanceReferencesFrom: [ STRUCTURE_ROAD ], distanceReferencesTo: [ STRUCTURE_SPAWN ], awayRelationship: [ 'sources', 'mineral', STRUCTURE_CONTROLLER ] })
 
     P.register('road', 'centralSpawn => labUnit', 'centralSpawn', 'labUnit')

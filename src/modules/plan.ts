@@ -688,6 +688,7 @@ class PlanModule {
                         return null
                 const unit = this.#unitDict[name].unit
                 const unitPos = this.#getUnitPos(roomName, name)
+                if ( !unitPos ) return null
                 const ret: { [structureType in StructureConstant]? : {pos: RoomPosition, tag: string[]}[] } = {}
                 unitPos.forEach(pos => {
                     for ( const structureType of unit.structureTypes ) {

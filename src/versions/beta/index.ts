@@ -12,6 +12,7 @@ import { registerFastUpgrade } from './modules/fastUpgrade'
 import { registerLinkManage } from './modules/linkManage'
 import { registerHarvestMineral } from './modules/harvestMineral'
 import { registerPaint } from './modules/paintRampart'
+import { issueHarvestDepositWatcher, registerHarvestDeposit } from './modules/harvestDeposit'
 
 /** AI 挂载入口 */
 export function mountAll() {
@@ -42,6 +43,9 @@ export function registerAll() {
     /** Claim Room 模块 */
     registerClaimRoom()
     issueClaimRoomWatcher()
+    /** Harvest Deposit 模块 */
+    registerHarvestDeposit()
+    issueHarvestDepositWatcher()
     /** Defend Room 模块 */
     registerDefendRoom()
     /** Link Manage 模块 */
