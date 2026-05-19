@@ -823,6 +823,7 @@ class PlanModule {
         STRUCTURE_OBSERVER, 
         STRUCTURE_POWER_SPAWN, 
         STRUCTURE_NUKER, 
+        STRUCTURE_EXTRACTOR, 
         STRUCTURE_ROAD
     ]
     #getStrictlyBuiltRoom(): string[] {
@@ -1015,7 +1016,7 @@ class PlanModule {
         }, [ pid ])
     }
     constructor() {
-        this.register('unit', PlanModule.PROTECT_UNIT, new Unit([ [STRUCTURE_RAMPART] ]))
+        this.register('unit', PlanModule.PROTECT_UNIT, new Unit([ [[STRUCTURE_RAMPART, STRUCTURE_ROAD]] ]))
         /** 完成建造后, 注册完成的建筑, 更新相关信号量 */
         A.proc.trigger('after', Creep.prototype, 'build', (returnValue, creep: Creep, target: ConstructionSite) => {
             if ( returnValue === OK && convertPosToString(target.pos) in this.#constructionSite2Info ) {

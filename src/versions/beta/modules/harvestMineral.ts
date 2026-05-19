@@ -7,8 +7,8 @@ export function registerHarvestMineral() {
     C.design('mineral_harvester', {
         amount: 1, 
         body: {
-            6: [ CARRY, WORK, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE ], 
-            7: [ CARRY, CARRY, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE ], 
+            6: [ CARRY, CARRY, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE ], 
+            7: [ CARRY, CARRY, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE ], 
         }
     })
 }
@@ -28,6 +28,13 @@ export function issueHarvestMineral(roomName: string) {
     A.proc.createProc([
         () => P.exist(roomName, `${roomName}: mineral's container`, 'container'), 
         () => P.exist(roomName, `${roomName}: extractor`, `extractor`), 
+        () => {
+            const mineral = Game.getObjectById(mineralId)
+            if ( mineral.mineralAmount === 0 ) {
+                return [ A.proc.STOP_SLEEP, (mineral.ticksToRegeneration || 0) + 1 ] as [ typeof A.proc.STOP_SLEEP, number ]
+            }
+            return A.proc.OK
+        }, 
         () => C.acquire('mineral_harvester', roomName, name => workerName = name), 
         ['gotoMineral', () => {
             const creep = Game.creeps[workerName]

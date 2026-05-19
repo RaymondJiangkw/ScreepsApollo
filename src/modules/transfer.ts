@@ -116,7 +116,8 @@ class TransferModule {
 
                         /** 即将消亡, 则逃离原位置 */
                         if ( creep.ticksToLive < 5 ) {
-                            creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
+                                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
                             return A.proc.OK_STOP_CURRENT
                         }
 
@@ -222,7 +223,8 @@ class TransferModule {
                         // 在最后一秒 withdraw 或 transfer 会返回成功, 但是不会执行
                         /** 即将消亡, 则逃离原位置 */
                         if ( creep.ticksToLive < 5 ) {
-                            creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
+                                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
                             return A.proc.OK_STOP_CURRENT
                         }
 
@@ -299,7 +301,8 @@ class TransferModule {
                         
                         // 在最后一秒 withdraw 或 transfer 会返回成功, 但是不会执行
                         if ( creep.ticksToLive < 5 ) {
-                            creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
+                                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
                             return A.proc.OK_STOP_CURRENT
                         }
 
@@ -416,7 +419,8 @@ class TransferModule {
 
                         /** 即将消亡, 则逃离原位置 */
                         if ( creep.ticksToLive < 5 ) {
-                            creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
+                                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
                             return A.proc.OK_STOP_CURRENT
                         }
 
@@ -522,7 +526,8 @@ class TransferModule {
                         // 在最后一秒 withdraw 或 transfer 会返回成功, 但是不会执行
                         /** 即将消亡, 则逃离原位置 */
                         if ( creep.ticksToLive < 5 ) {
-                            creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
+                                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
                             return A.proc.OK_STOP_CURRENT
                         }
 
@@ -604,7 +609,8 @@ class TransferModule {
                         
                         // 在最后一秒 withdraw 或 transfer 会返回成功, 但是不会执行
                         if ( creep.ticksToLive < 5 ) {
-                            creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 2, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
+                            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length > 0 )
+                                creep.travelTo( creep.pos, { flee: true, ignoreCreeps: false, range: 1, avoidStructureTypes: [ STRUCTURE_CONTAINER ] } )
                             return A.proc.OK_STOP_CURRENT
                         }
 

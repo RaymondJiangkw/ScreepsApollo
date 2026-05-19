@@ -104,7 +104,7 @@ interface SignalModule {
     createSignal(value: number): string
     /** 销毁一个信号量 */
     destroySignal(signalId: string): void
-    /** @atom 等待一个信号量集, 只能在进程流程中运行使用 */
+    /** @atom 等待一个信号量集 (AND 关系), 只能在进程流程中运行使用 */
     Swait(...signals: {signalId: string, lowerbound: number, request: number}[]): StuckableAtomicFuncReturnCode
     /** @atom 激活一个信号量集, 只能在进程流程中运行使用 */
     Ssignal(...signals: {signalId: string, request: number}[]): StuckableAtomicFuncReturnCode
@@ -382,6 +382,11 @@ class ProcessModule {
     /** 记录上一次调用 tick 的 Game.time 以保证每 tick 只能执行一次 tick */
     #lastTick: number = -1
 
+    // /** 获得当前运行的进程 Id */
+    // getCurrentPid(): number {
+    //     return this.#currentProcId
+    // }
+
     /**
      * 在当前 tick 运行一次
      * 
@@ -530,10 +535,10 @@ class ProcessModule {
                         break
                     } else if (Array.isArray(returnCode) && returnCode[0] === this.STOP_SLEEP) {
                         // 休眠, 此时不应被信号量唤醒
-                        // 下次从头开始
+                        // 下次在同一位置开始
                         proc.state = PROCESS_STATE_SLEEP
                         this.#processIdSleepQueue.push(id)
-                        proc.pc = 0
+                        // proc.pc = 0
                         // 复原状态
                         this.#currentProcId = -1
                         // 定时唤醒
@@ -718,13 +723,17 @@ class ProcessModule {
             // 找不到信号量 (可能已经销毁)
             if (!signal) continue
             signal.value += signalDescriptor.request
-            for (const [pid, lb] of signal.stuckList)
-                this.#wakeUpProc(pid)
-                // if ( signal.value >= lb )
-                //     this.#wakeUpProc(pid)
-                // else
-                //     log(LOG_DEBUG, `信号量值 ${signal.value} 不够 ${lb}, 无法唤醒 ${this.#procDict[pid]}`)
-            signal.stuckList = []
+            const newStuckList = []
+            for (const [pid, lb] of signal.stuckList) {
+                // this.#wakeUpProc(pid)
+                if ( signal.value >= lb ) {
+                    this.#wakeUpProc(pid)
+                } else {
+                    log(LOG_DEBUG, `信号量值 ${signal.value} 不够 ${lb}, 无法唤醒 ${this.#procDict[pid]}`)
+                    newStuckList.push([ pid, lb ])
+                }
+            }  
+            signal.stuckList = newStuckList // []
         }
         
         return this.OK

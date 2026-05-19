@@ -61,7 +61,7 @@ export function issuePaintProc(roomName: string) {
                 repairedPos = null
                 return [ A.proc.OK_STOP_CUSTOM, 'getRepairedPos' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
             }
-        } else creep.travelTo(repairedPos, { range: 3 })
+        } else creep.moveTo(repairedPos)
 
         return A.proc.OK_STOP_CURRENT
     }

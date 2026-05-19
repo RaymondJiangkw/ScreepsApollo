@@ -1,13 +1,12 @@
 /**
  * 市场管理模块
- * 永远默认从 storage 中存取
  * 核心思想是 少则买, 多则卖
  * 自动程序不挂单 (因为挂单需要预留资源, 可能浪费空间)
  * 需要提供函数方便手动挂单和执行单
  * 
  * 主要思路: 维持 storage 和 terminal 内资源
- * terminal 内资源多, 就卖
- * storage 内资源少, 就买
+ * terminal 内资源从 storage 中取 (有列表), 或者 买; 特定资源多了, 就卖
+ * storage 内资源从 terminal 中取 (有列表), 或者 生产
  */
 
 import { Apollo as A } from '@/framework/apollo'
@@ -15,7 +14,7 @@ import { planModule as P } from '@/modules/plan'
 import { getTransferUnit, transferModule as T } from "@/modules/transfer"
 import { assertWithMsg, getFileNameAndLineNumber, log, LOG_DEBUG, LOG_ERR } from "@/utils"
 import { getCentralTransferUnit } from './centralTransfer'
-import { getStorageMinMaintainAmount, getTerminalBuyInfo, getTerminalMaintainAmount, getTerminalMaintainTypes, getTerminalMaxMaintainAmount, getTerminalMinMaintainAmount, getTerminalSellList } from '../config.production'
+import { getStorageMinMaintainAmount, getTerminalBuyInfo, getTerminalMaintainAmount, getTerminalMaintainFromStorageList, getTerminalMaxMaintainAmount, getTerminalMinMaintainAmount, getTerminalSellList } from '../config.production'
 
 /** 因为不同 Terminal 可能同时执行, 然后 Credits 没有更新, 所以限制同一 tick, 只有一个 order 执行 */
 let lastExecutionTick = null
@@ -35,6 +34,11 @@ declare global {
     interface Memory {
         priceHistoryTracker?: {[resourceType in ResourceConstant]? : PriceHistoryTrackerMemory};
     }
+}
+
+function getPricePolicy(): 'fair' | 'force' {
+    if ( !('pricePolicy' in (Memory as any)) ) return 'fair'
+    return (Memory as any).pricePolicy
 }
 
 class PriceHistoryTracker {
@@ -151,18 +155,29 @@ class PriceHistoryTracker {
         return "hold";
     }
 
-    isGoodBuy(resource: ResourceConstant, price: number): boolean {
-        return this.#judgePrice(resource, price) === "buy"
+    #addEnergyPrice(roomNameU: string, roomNameV: string) {
+        return this.#getThresholds(RESOURCE_ENERGY).fairPrice * (1 - Math.exp(-Game.map.getRoomLinearDistance(roomNameU, roomNameV) / 30.))
     }
 
-    isGoodSell(resource: ResourceConstant, price: number): boolean {
-        return this.#judgePrice(resource, price) === "sell";
+    isGoodBuy(resource: ResourceConstant, price: number, roomNameU: string, roomNameV: string): boolean {
+        if ( getPricePolicy() === 'fair' ) return this.#judgePrice(resource, price + this.#addEnergyPrice(roomNameU, roomNameV)) === "buy"
+        else return true
+    }
+
+    isGoodSell(resource: ResourceConstant, price: number, roomNameU: string, roomNameV: string): boolean {
+        if ( getPricePolicy() === 'fair' ) return this.#judgePrice(resource, price - this.#addEnergyPrice(roomNameU, roomNameV)) === "sell"
+        else return true
     }
 
     estimateFullCostForBuying() {
         let cost = 0
         for ( const resourceType in getTerminalBuyInfo() ) cost += getTerminalBuyInfo()[resourceType].max * this.#getThresholds(resourceType as ResourceConstant).buyBelow
         return cost
+    }
+
+    getFairPrice(resource: ResourceConstant) {
+        const thresholds = this.#getThresholds(resource)
+        console.log(`对于 ${resource}: Buy 阈值 (${thresholds.buyBelow}), Sell 阈值 (${thresholds.sellAbove}), Fair Price (${thresholds.fairPrice})`)
     }
 
     constructor() {
@@ -248,27 +263,27 @@ class MarketRoomDescriptor {
         assertWithMsg(!!Game.rooms[roomName] && !!Game.rooms[roomName].controller && Game.rooms[roomName].controller.my, `无法为非自己的房间 ${roomName} 创建市场描述器`)
         /** 检查当前描述是否有效 */
         const requiredCapacity = _.sum(Object.values(this.getDescription()['buy']))
-        if ( !Game.rooms[roomName].storage || A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) < requiredCapacity ) {
-            log(LOG_DEBUG, `无法找到 ${roomName} Storage 或 Storage Capacity 不够`)
+        if ( !Game.rooms[roomName].terminal || A.res.query(Game.rooms[roomName].terminal.id, A.res.CAPACITY) < requiredCapacity ) {
+            log(LOG_DEBUG, `无法找到 ${roomName} Terminal 或 Terminal Capacity 不够`)
             this.#resetDescription("buy")
         }
         let sellFlag = true
         for ( const resourceType in this.getDescription()["sell"] ) {
-            if ( !Game.rooms[roomName].storage || A.res.query(Game.rooms[roomName].storage.id, resourceType as ResourceConstant) < this.getDescription()["sell"][resourceType] ) {
+            if ( !Game.rooms[roomName].terminal || A.res.query(Game.rooms[roomName].terminal.id, resourceType as ResourceConstant) < this.getDescription()["sell"][resourceType] ) {
                 sellFlag = false
                 break
             }
         }
         if ( !sellFlag ) {
-            log(LOG_DEBUG, `无法找到 ${roomName} Storage 或 Storage 内资源不对`)
+            log(LOG_DEBUG, `无法找到 ${roomName} Terminal 或 Terminal 内资源不对`)
             this.#resetDescription("sell")
         }
         /** 重新注册一遍 buy / sell */
         for ( const resourceType in this.getDescription()["buy"] ) {
-            assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount: this.getDescription()["buy"][resourceType] }) === A.proc.OK, getFileNameAndLineNumber() )
+            assertWithMsg( A.res.request({ id: Game.rooms[roomName].terminal.id, resourceType: A.res.CAPACITY, amount: this.getDescription()["buy"][resourceType] }) === A.proc.OK, getFileNameAndLineNumber() )
         }
         for ( const resourceType in this.getDescription()["sell"] ) {
-            assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: resourceType as ResourceConstant, amount: this.getDescription()["sell"][resourceType] }) === A.proc.OK, getFileNameAndLineNumber() )
+            assertWithMsg( A.res.request({ id: Game.rooms[roomName].terminal.id, resourceType: resourceType as ResourceConstant, amount: this.getDescription()["sell"][resourceType] }) === A.proc.OK, getFileNameAndLineNumber() )
         }
     }
 }
@@ -371,39 +386,89 @@ class MarketModule {
             }
         }, [], `Order ${orderId} 监视`, 1)
     }
+    #issueInstantOrderWatcher(orderId: string, reserve: boolean = true) {
+        assertWithMsg( orderId in Game.market.orders, `无法找到 Order ${orderId}. Order 创建后必须在下一 tick 才开始监视` )
+        if ( !Game.market.orders[orderId].active ) {
+            log(LOG_ERR, `${orderId} 并不有效! ${JSON.stringify(Game.market.orders[orderId])}`)
+            Game.market.cancelOrder(orderId)
+            return
+        }
+        assertWithMsg( Game.market.orders[orderId].type === ORDER_BUY, `Instant Order 只支持购买` )
+        let lastAmount = Game.market.orders[orderId].amount
+        // 不为非资源类 order 创建监视器
+        if ( !_.includes(RESOURCES_ALL, Game.market.orders[orderId].resourceType) ) return
+        assertWithMsg( !!Game.rooms[Game.market.orders[orderId].roomName] && !!Game.rooms[Game.market.orders[orderId].roomName].controller && Game.rooms[Game.market.orders[orderId].roomName].controller.my, `订单 ${orderId} 的房间 ${Game.market.orders[orderId].roomName} 无效` )
+        if ( reserve ) {
+            // 提前预留空间
+            assertWithMsg( A.res.request({ id: Game.rooms[Game.market.orders[orderId].roomName].terminal.id, resourceType: A.res.CAPACITY, amount: Game.market.orders[orderId].amount }) === A.proc.OK, `订单 ${orderId} 买入 ${Game.market.orders[orderId].amount} ${Game.market.orders[orderId].resourceType}, 但是没有充足容量!` )
+        }
+        A.timer.add(Game.time + 1, () => {
+            const order = Game.market.orders[orderId]
+            if ( order.amount === 0 || !order.active ) {
+                Game.market.cancelOrder(orderId)
+                return A.timer.STOP
+            }
+            if ( order.amount === lastAmount ) return
+            let updateAmount = lastAmount - order.amount
+            lastAmount = order.amount
+            const terminal = Game.rooms[order.roomName].terminal
+            if ( !terminal ) {
+                log(LOG_ERR, `订单无法找到 Terminal!`)
+                Game.market.cancelOrder(orderId)
+                return A.timer.STOP
+            }
+            const resourceType = order.resourceType as ResourceConstant
+            assertWithMsg( A.res.signal(terminal.id, resourceType, updateAmount) === A.proc.OK, getFileNameAndLineNumber() )
+        }, [], `Instant Order ${orderId} 监视`, 1)
+    }
     /** 用于判断维持 / 买卖, 卖单仍假定在内 */
     #getEffectiveTerminalResourceAmount(roomName: string, resourceType: ResourceConstant) {
         let amount = 0
         if ( !Game.rooms[roomName] ) return amount
         if ( !!Game.rooms[roomName].terminal ) amount += A.res.query(Game.rooms[roomName].terminal.id, resourceType)
         // 检查扫单情况
-        // 卖单假定仍在库内
+        // 买卖单 (扫单的) 假定在库内
         if ( roomName in this.#repo ) {
+            amount += this.#repo[roomName].resourceStatus.getDescription()["buy"][resourceType] || 0
             amount += this.#repo[roomName].resourceStatus.getDescription()["sell"][resourceType] || 0
         }
         // 检查挂单情况
         for ( const orderId in Game.market.orders ) {
             if ( Game.market.orders[orderId].roomName !== roomName || Game.market.orders[orderId].resourceType !== resourceType || Game.market.orders[orderId].type !== ORDER_SELL ) continue
+            // 买单自动转运到 Storage 所以不算
             amount += Game.market.orders[orderId].amount || 0
         }
         return amount
     }
-    /** 用于判断买卖, 买单假定已经成功, 还有运输中的量 */
-    #getEffectiveStorageResourceAmount(roomName: string, resourceType: ResourceConstant) {
-        let amount = 0
-        if ( !Game.rooms[roomName] ) return amount
-        if ( !!Game.rooms[roomName].storage ) amount += A.res.query(Game.rooms[roomName].storage.id, resourceType)
-        if ( roomName in this.#repo ) {
-            amount += this.#repo[roomName].resourceStatus.getDescription()["buy"][resourceType] || 0
-            amount += this.#repo[roomName].terminalStatus.getDescription()[resourceType] || 0
+    #calcMaximumAmount(srcRoomName: string, tarRoomName: string, availableEnergy: number, isSendingEnergy: boolean) {
+        if ( !isSendingEnergy ) return Math.floor(availableEnergy / (1. - Math.exp(-Game.map.getRoomLinearDistance(srcRoomName, tarRoomName, true) / 30.)))
+        else {
+            const unitCost = Math.ceil(1 + (1. - Math.exp(-Game.map.getRoomLinearDistance(srcRoomName, tarRoomName, true) / 30.)))
+            return Math.floor(availableEnergy / unitCost)
         }
-        for ( const orderId in Game.market.orders ) {
-            if ( Game.market.orders[orderId].roomName !== roomName || Game.market.orders[orderId].resourceType !== resourceType || Game.market.orders[orderId].type !== ORDER_BUY ) continue
-            amount += Game.market.orders[orderId].amount || 0
-        }
-        return amount
     }
-    /** 帮助手动挂单 */
+    /** 帮助手动挂单, 挂单直接存 Terminal */
+    createInstantOrder(roomName: string, resourceType: ResourceConstant, amount: number, price: number) {
+        if ( !Game.rooms[roomName] || !Game.rooms[roomName].terminal ) return `${roomName} 无效, 或 Terminal 无法找到`
+        // 校验 Order 是否能够成功
+        const requiredCredits = amount * price * (1 + 0.05)
+        if ( Game.market.credits < requiredCredits ) return `Credits 不够! 最多只能支持 ${Math.floor(Game.market.credits / price / (1 + 0.05))} 这么多`
+        const capacity = A.res.query(Game.rooms[roomName].terminal.id, A.res.CAPACITY)
+        if ( amount > capacity ) return `Capacity 不够! 最多只能支持 ${capacity} 这么多`
+        assertWithMsg( A.res.request({ id: Game.rooms[roomName].terminal.id, resourceType: A.res.CAPACITY, amount }) === A.proc.OK, getFileNameAndLineNumber() )
+        const config = {
+            type: ORDER_BUY, resourceType: resourceType, price: price, totalAmount: amount, roomName: roomName
+        }
+        const retCode = Game.market.createOrder(config)
+        assertWithMsg( retCode === OK, getFileNameAndLineNumber() )
+        A.timer.add(Game.time + 2, (time, resourceType, price, amount, roomName) => {
+            const order = _.filter(Game.market.orders, o => o.created === time && o.type === ORDER_BUY && o.resourceType === resourceType && Math.floor(o.price) === Math.floor(price) && o.totalAmount === amount && o.roomName === roomName)[0]
+            assertWithMsg( !!order, `无法找到 (${time}, ${ORDER_BUY}, ${resourceType}, ${price}, ${amount}, ${roomName}) 的订单!` )
+            this.#issueInstantOrderWatcher(order.id, false)
+        }, [ Game.time, resourceType, price, amount, roomName ], `追踪创建的订单`)
+        return `成功挂单! ${retCode}: ${JSON.stringify(config)}`
+    }
+    /** 帮助手动挂单, 挂单永远往 Storage 里存 */
     createOrder(orderType: ORDER_BUY | ORDER_SELL, roomName: string, resourceType: ResourceConstant, amount: number, price: number) {
         if ( !Game.rooms[roomName] || !Game.rooms[roomName].terminal || !Game.rooms[roomName].storage ) return `${roomName} 无效, 或 Storage / Terminal 无法找到`
         // 校验 Order 是否能够成功
@@ -432,10 +497,11 @@ class MarketModule {
         return `成功挂单! ${retCode}: ${JSON.stringify(config)}`
     }
     /** 帮助手动成交 */
-    deal(orderId: string, amount: number, roomName: string) {
+    deal(orderId: string, amount: number, roomName: string, transferToStorage: boolean = true) {
         assertWithMsg( !!Game.rooms[roomName] && !!Game.rooms[roomName].controller && Game.rooms[roomName].controller.my && !!Game.rooms[roomName].terminal, `${roomName} 房间无效!` )
         if ( Game.rooms[roomName].terminal.cooldown > 0 ) return `Terminal 仍在冷却`
         const order = Game.market.getOrderById(orderId)
+        if ( !order ) return `无法找到订单!`
         if ( order.amount < amount ) return `无法成交! 最多成交 ${order.amount} 这么多!`
         const energyCost = Game.market.calcTransactionCost(amount, roomName, order.roomName)
         if ( energyCost > A.res.query(Game.rooms[roomName].terminal.id, RESOURCE_ENERGY) ) return `无法成交! 能量不足, 最多成交 ${Math.floor(A.res.query(Game.rooms[roomName].terminal.id, RESOURCE_ENERGY) / (1 - Math.exp(-Game.map.getRoomLinearDistance(roomName, order.roomName) / 30.0)))}!`
@@ -463,16 +529,16 @@ class MarketModule {
             }, [ Game.rooms[roomName].terminal.id, Game.rooms[roomName].storage.id, orderId, order.resourceType, energyCost, amount, roomName ], `Deal Order ${orderId}`)
         } else {
             if ( Game.market.credits < order.price * amount ) return `无法成交! 最多成交 ${Math.floor(Game.market.credits / order.price)} 这么多!`
-            const capacity = Math.min(A.res.query(Game.rooms[roomName].terminal.id, A.res.CAPACITY), A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY))
+            const capacity = transferToStorage ? Math.min(A.res.query(Game.rooms[roomName].terminal.id, A.res.CAPACITY), A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY)) : A.res.query(Game.rooms[roomName].terminal.id, A.res.CAPACITY)
             if ( capacity < amount ) return `无法成交! 最多成交 ${capacity} 这么多!`
 
             assertWithMsg( A.res.request({ id: Game.rooms[roomName].terminal.id, resourceType: RESOURCE_ENERGY, amount: energyCost }) === A.proc.OK, getFileNameAndLineNumber() )
             assertWithMsg( A.res.request({ id: Game.rooms[roomName].terminal.id, resourceType: A.res.CAPACITY, amount: amount }) === A.proc.OK, getFileNameAndLineNumber() )
-            assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount: amount }) === A.proc.OK, getFileNameAndLineNumber() )
+            if ( transferToStorage ) assertWithMsg( A.res.request({ id: Game.rooms[roomName].storage.id, resourceType: A.res.CAPACITY, amount: amount }) === A.proc.OK, getFileNameAndLineNumber() )
 
             assertWithMsg( Game.market.deal(order.id, amount, roomName) === OK, getFileNameAndLineNumber() )
             
-            A.timer.add(Game.time + 1, (orderId, resourceType, executionAmount, energyCost, idTerminal, idStorage) => {
+            A.timer.add(Game.time + 1, (orderId, resourceType, executionAmount, energyCost, idTerminal, idStorage, transferToStorage) => {
                 if ( !Game.getObjectById(idTerminal) || !Game.getObjectById(idStorage) ) return
                 const terminal = Game.getObjectById(idTerminal) as StructureTerminal
                 const storage = Game.getObjectById(idStorage) as StructureStorage
@@ -482,39 +548,56 @@ class MarketModule {
                     // 归还预留空间
                     assertWithMsg( A.res.signal(terminal.id, RESOURCE_ENERGY, energyCost) === A.proc.OK, getFileNameAndLineNumber() )
                     assertWithMsg( A.res.signal(terminal.id, A.res.CAPACITY, executionAmount) === A.proc.OK, getFileNameAndLineNumber() )
-                    assertWithMsg( A.res.signal(storage.id, A.res.CAPACITY, executionAmount) === A.proc.OK, getFileNameAndLineNumber() )
+                    if ( transferToStorage ) assertWithMsg( A.res.signal(storage.id, A.res.CAPACITY, executionAmount) === A.proc.OK, getFileNameAndLineNumber() )
                     return
                 }
                 // 此时成功完成
                 assertWithMsg( A.res.signal(terminal.id, A.res.CAPACITY, energyCost) === A.proc.OK, getFileNameAndLineNumber() )
-
-                this.#repo[roomName].terminalStatus.getDescription()[resourceType] = (this.#repo[roomName].terminalStatus.getDescription()[resourceType] || 0) + executionAmount
                 
-                // 此时 resource 一收一发, 不再重复
-                for ( let patchIdx = 0; patchIdx < Math.ceil(executionAmount / getCentralTransferUnit(Game.rooms[roomName].controller.level)); ++patchIdx ) {
-                    const patchAmount = Math.min(getCentralTransferUnit(Game.rooms[roomName].controller.level), executionAmount - patchIdx * getCentralTransferUnit(Game.rooms[roomName].controller.level))
-                    T.transfer(terminal.id, storage.id, resourceType, patchAmount, {
-                        disallowGrouping: true, 
-                        loseCallback: () => {
-                            this.#repo[roomName].terminalStatus.getDescription()[resourceType] -= patchAmount
-                            if ( this.#repo[roomName].terminalStatus.getDescription()[resourceType] === 0 ) {
-                                delete this.#repo[roomName].terminalStatus.getDescription()[resourceType]
-                            }
-                        }, 
-                        callback: () => {
-                            this.#repo[roomName].terminalStatus.getDescription()[resourceType] -= patchAmount
-                            if ( this.#repo[roomName].terminalStatus.getDescription()[resourceType] === 0 ) {
-                                delete this.#repo[roomName].terminalStatus.getDescription()[resourceType]
-                            }
-                        }, 
-                        priority: T.PRIORITY_CASUAL
-                    })
+                if ( transferToStorage ) {
+                    this.#repo[roomName].terminalStatus.getDescription()[resourceType] = (this.#repo[roomName].terminalStatus.getDescription()[resourceType] || 0) + executionAmount
+
+                    // 此时 resource 一收一发, 不再重复
+                    for ( let patchIdx = 0; patchIdx < Math.ceil(executionAmount / getCentralTransferUnit(Game.rooms[roomName].controller.level)); ++patchIdx ) {
+                        const patchAmount = Math.min(getCentralTransferUnit(Game.rooms[roomName].controller.level), executionAmount - patchIdx * getCentralTransferUnit(Game.rooms[roomName].controller.level))
+                        T.transfer(terminal.id, storage.id, resourceType, patchAmount, {
+                            disallowGrouping: true, 
+                            loseCallback: () => {
+                                this.#repo[roomName].terminalStatus.getDescription()[resourceType] -= patchAmount
+                                if ( this.#repo[roomName].terminalStatus.getDescription()[resourceType] === 0 ) {
+                                    delete this.#repo[roomName].terminalStatus.getDescription()[resourceType]
+                                }
+                            }, 
+                            callback: () => {
+                                this.#repo[roomName].terminalStatus.getDescription()[resourceType] -= patchAmount
+                                if ( this.#repo[roomName].terminalStatus.getDescription()[resourceType] === 0 ) {
+                                    delete this.#repo[roomName].terminalStatus.getDescription()[resourceType]
+                                }
+                            }, 
+                            priority: T.PRIORITY_CASUAL
+                        })
+                    }
+                } else {
+                    assertWithMsg( A.res.signal(terminal.id, resourceType, executionAmount) === A.proc.OK, getFileNameAndLineNumber() )
                 }
-            }, [ order.id, order.resourceType, amount, energyCost, Game.rooms[roomName].terminal.id, Game.rooms[roomName].storage.id ], `执行 ${order.id}`)
+            }, [ order.id, order.resourceType, amount, energyCost, Game.rooms[roomName].terminal.id, Game.rooms[roomName].storage.id, transferToStorage ], `执行 ${order.id}`)
         }
     }
-    send(srcRoomName: string, targetRoomName: string, resourceType: ResourceConstant, amount: number) {
-        // ...
+    send(srcRoomName: string, tarRoomName: string, resourceType: ResourceConstant, amount: number) {
+        if ( !Game.rooms[srcRoomName] || !Game.rooms[srcRoomName].terminal ) return ERR_INVALID_ARGS
+        if ( !Game.rooms[tarRoomName] || !Game.rooms[tarRoomName].terminal ) return ERR_INVALID_ARGS
+        if ( Game.rooms[srcRoomName].terminal.cooldown > 0 ) return ERR_TIRED
+        if ( A.res.query(Game.rooms[srcRoomName].terminal.id, resourceType) < amount || A.res.query(Game.rooms[tarRoomName].terminal.id, A.res.CAPACITY) < amount ) return ERR_INVALID_ARGS
+        if ( this.#calcMaximumAmount(srcRoomName, tarRoomName, A.res.query(Game.rooms[srcRoomName].terminal.id, RESOURCE_ENERGY), resourceType === RESOURCE_ENERGY) > amount ) return ERR_INVALID_ARGS
+        assertWithMsg( A.res.request({ id: Game.rooms[srcRoomName].terminal.id, resourceType, amount }) === A.proc.OK, getFileNameAndLineNumber() )
+        assertWithMsg( A.res.request({ id: Game.rooms[tarRoomName].terminal.id, resourceType: A.res.CAPACITY, amount }) === A.proc.OK, getFileNameAndLineNumber() )
+        const retCode = Game.rooms[srcRoomName].terminal.send(resourceType, amount, tarRoomName)
+        assertWithMsg( retCode === OK, `${srcRoomName} -> ${tarRoomName}: ${amount} ${resourceType} 失败 (${retCode})` )
+        A.timer.add(Game.time + 1, (srcId, tarId, resourceType, amount) => {
+            assertWithMsg( A.res.signal(srcId, A.res.CAPACITY, amount) === A.proc.OK, getFileNameAndLineNumber() )
+            assertWithMsg( A.res.signal(tarId, resourceType, amount) === A.proc.OK, getFileNameAndLineNumber() )
+        }, [ Game.rooms[srcRoomName].terminal.id, Game.rooms[tarRoomName].terminal.id, resourceType, amount ], `更新 send ${srcRoomName} -> ${tarRoomName}: ${amount} ${resourceType}`)
+        return OK
     }
     issue(roomName: string) {
         // Terminal 内维持一定的能量数量
@@ -594,7 +677,8 @@ class MarketModule {
                 if ( A.res.query(terminal.id, A.res.CAPACITY) <= getTerminalMaintainAmount("free before store") ) return A.proc.STOP_SLEEP
 
                 let isFinish = true
-                for ( const resourceType of getTerminalMaintainTypes() ) {
+                for ( const resourceType of getTerminalMaintainFromStorageList() ) {
+                    if ( (resourceType as any) === "mineral" ) continue
                     if ( this.#getEffectiveTerminalResourceAmount(roomName, resourceType) >= getTerminalMaxMaintainAmount(resourceType) ) continue
                     isFinish = false
 
@@ -649,25 +733,24 @@ class MarketModule {
         ],`${roomName} Terminal Fill Mineral`, true)
 
         A.proc.trigger("watch", () => {
-            if ( !Game.rooms[roomName] || !Game.rooms[roomName].terminal ) return false
+            if ( !Game.rooms[roomName] || !Game.rooms[roomName].storage || !Game.rooms[roomName].terminal || A.res.query(Game.rooms[roomName].terminal.id, A.res.CAPACITY) <= getTerminalMaintainAmount("free before store") ) return false
             let anyResourceNeedFill = false
-            for ( const resourceType of getTerminalMaintainTypes() ) {
+            for ( const resourceType of getTerminalMaintainFromStorageList() ) {
+                if ( (resourceType as any) === "mineral" ) continue
                 anyResourceNeedFill = anyResourceNeedFill || this.#getEffectiveTerminalResourceAmount(roomName, resourceType) < getTerminalMinMaintainAmount(resourceType)
                 if ( anyResourceNeedFill ) break
             }
             anyResourceNeedFill = anyResourceNeedFill || this.#getEffectiveTerminalResourceAmount(roomName, mineralType) < getTerminalMinMaintainAmount("mineral")
-            return !!Game.rooms[roomName] && !!Game.rooms[roomName].storage && !!Game.rooms[roomName].terminal && A.res.query(Game.rooms[roomName].terminal.id, A.res.CAPACITY) > getTerminalMaintainAmount("free before store") && anyResourceNeedFill
+            return anyResourceNeedFill
         }, [ mineralPid, generalPid ])
 
         // 最后 Terminal 扫单
         A.proc.createProc([
             () => A.proc.signal.Swait({ signalId: this.#repo[roomName].readySignal, lowerbound: 1, request: 0 }), 
-            () => P.exist(roomName, 'centralTransfer', 'storage'),
             () => P.exist(roomName, 'centralTransfer', 'terminal'), 
             () => {
                 const terminal = Game.rooms[roomName].terminal
-                const storage = Game.rooms[roomName].storage
-                if ( !terminal || !storage ) return [ A.proc.STOP_ERR, `无法在 ${roomName} 找到 Storage 或 Terminal` ] as [ typeof A.proc.STOP_ERR, string ]
+                if ( !terminal ) return [ A.proc.STOP_ERR, `无法在 ${roomName} 找到 Terminal` ] as [ typeof A.proc.STOP_ERR, string ]
                 if ( !!lastExecutionTick && lastExecutionTick >= Game.time ) return A.proc.OK_STOP_CURRENT
                 if ( A.res.query(terminal.id, RESOURCE_ENERGY) < MIN_EXECUTION_ENERGY ) return A.res.request({ id: terminal.id, resourceType: RESOURCE_ENERGY, amount: { lowerbound: MIN_EXECUTION_ENERGY, request: 0 } })
                 if ( terminal.cooldown > 0 ) return [ A.proc.STOP_SLEEP, terminal.cooldown + 1 ] as [ typeof A.proc.STOP_SLEEP, number ]
@@ -678,9 +761,9 @@ class MarketModule {
                         const buyAmount = this.#repo[roomName].resourceStatus.getDescription()["buy"][resourceType]
                         if ( buyAmount <= 0 ) continue
                         const order = _.min(Game.market.getAllOrders({type: ORDER_SELL, resourceType: resourceType as ResourceConstant}).filter(o => o.amount > 0), o => o.price)
-                        if ( !order || !this.tracker.isGoodBuy(resourceType as ResourceConstant, order.price) ) continue
+                        if ( !order || !this.tracker.isGoodBuy(resourceType as ResourceConstant, order.price, roomName, order.roomName) ) continue
                         const sellAmount = order.amount
-                        const capacity = Math.min(A.res.query(terminal.id, A.res.CAPACITY), A.res.query(storage.id, A.res.CAPACITY))
+                        const capacity = A.res.query(terminal.id, A.res.CAPACITY)
                         const maxSupportedAmount = Math.min(Math.floor(A.res.query(terminal.id, RESOURCE_ENERGY) / (1. - Math.exp(-Game.map.getRoomLinearDistance(roomName, order.roomName, true) / 30.))), Math.floor(Game.market.credits / order.price))
                         const executionAmount = Math.min(buyAmount, sellAmount, capacity, maxSupportedAmount)
                         if ( executionAmount <= 0 ) {
@@ -691,53 +774,30 @@ class MarketModule {
                         assertWithMsg( energyCost <= A.res.query(terminal.id, RESOURCE_ENERGY), `执行订单 ${order.id} (${executionAmount}) 需要 ${energyCost} energy 但是只有 ${A.res.query(terminal.id, RESOURCE_ENERGY)}` )
                         
                         assertWithMsg( A.res.request({ id: terminal.id, resourceType: RESOURCE_ENERGY, amount: energyCost }) === A.proc.OK, getFileNameAndLineNumber() )
-                        assertWithMsg( A.res.request({ id: terminal.id, resourceType: A.res.CAPACITY, amount: executionAmount }) === A.proc.OK, getFileNameAndLineNumber() )
-                        assertWithMsg( A.res.request({ id: storage.id, resourceType: A.res.CAPACITY, amount: executionAmount }) === A.proc.OK, getFileNameAndLineNumber() )
+                        // 不重复 request
+                        // 挂单时已经 request 过
+                        // assertWithMsg( A.res.request({ id: terminal.id, resourceType: A.res.CAPACITY, amount: executionAmount }) === A.proc.OK, getFileNameAndLineNumber() )
 
                         assertWithMsg( Game.market.deal(order.id, executionAmount, roomName) === OK, getFileNameAndLineNumber() )
 
                         lastExecutionTick = Game.time
                         
-                        A.timer.add(Game.time + 1, (orderId, resourceType, oldAmount, executionAmount, energyCost, idTerminal, idStorage) => {
-                            if ( !Game.getObjectById(idTerminal) || !Game.getObjectById(idStorage) ) return
+                        A.timer.add(Game.time + 1, (orderId, resourceType, oldAmount, executionAmount, energyCost, idTerminal) => {
+                            if ( !Game.getObjectById(idTerminal) ) return
                             const terminal = Game.getObjectById(idTerminal) as StructureTerminal
-                            const storage = Game.getObjectById(idStorage) as StructureStorage
                             // 首先判定订单是否真的被执行成功
                             const succeed = _.filter(Game.market.incomingTransactions, tt => !!tt.order && tt.order.id === orderId).length > 0
                             if ( !succeed ) {
                                 // 归还预留空间
                                 assertWithMsg( A.res.signal(terminal.id, RESOURCE_ENERGY, energyCost) === A.proc.OK, getFileNameAndLineNumber() )
-                                assertWithMsg( A.res.signal(terminal.id, A.res.CAPACITY, executionAmount) === A.proc.OK, getFileNameAndLineNumber() )
-                                assertWithMsg( A.res.signal(storage.id, A.res.CAPACITY, executionAmount) === A.proc.OK, getFileNameAndLineNumber() )
+                                // assertWithMsg( A.res.signal(terminal.id, A.res.CAPACITY, executionAmount) === A.proc.OK, getFileNameAndLineNumber() )
                                 return
                             }
                             // 此时成功完成
                             this.#repo[roomName].resourceStatus.getDescription()["buy"][resourceType] -= executionAmount // (落袋为安, 可以直接更新)
                             assertWithMsg( A.res.signal(terminal.id, A.res.CAPACITY, energyCost) === A.proc.OK, getFileNameAndLineNumber() )
-
-                            this.#repo[roomName].terminalStatus.getDescription()[resourceType] = (this.#repo[roomName].terminalStatus.getDescription()[resourceType] || 0) + executionAmount
-                            
-                            // 此时 resource 一收一发, 不再重复
-                            for ( let patchIdx = 0; patchIdx < Math.ceil(executionAmount / getCentralTransferUnit(Game.rooms[roomName].controller.level)); ++patchIdx ) {
-                                const patchAmount = Math.min(getCentralTransferUnit(Game.rooms[roomName].controller.level), executionAmount - patchIdx * getCentralTransferUnit(Game.rooms[roomName].controller.level))
-                                T.transfer(terminal.id, storage.id, resourceType, patchAmount, {
-                                    disallowGrouping: true, 
-                                    loseCallback: () => {
-                                        this.#repo[roomName].terminalStatus.getDescription()[resourceType] -= patchAmount
-                                        if ( this.#repo[roomName].terminalStatus.getDescription()[resourceType] === 0 ) {
-                                            delete this.#repo[roomName].terminalStatus.getDescription()[resourceType]
-                                        }
-                                    }, 
-                                    callback: () => {
-                                        this.#repo[roomName].terminalStatus.getDescription()[resourceType] -= patchAmount
-                                        if ( this.#repo[roomName].terminalStatus.getDescription()[resourceType] === 0 ) {
-                                            delete this.#repo[roomName].terminalStatus.getDescription()[resourceType]
-                                        }
-                                    }, 
-                                    priority: T.PRIORITY_CASUAL
-                                })
-                            }
-                        }, [ order.id, resourceType, terminal.store.getUsedCapacity(resourceType as ResourceConstant), executionAmount, energyCost, terminal.id, storage.id ], `执行 ${order.id}`)
+                            assertWithMsg( A.res.signal(terminal.id, resourceType, executionAmount) === A.proc.OK, getFileNameAndLineNumber() )
+                        }, [ order.id, resourceType, terminal.store.getUsedCapacity(resourceType as ResourceConstant), executionAmount, energyCost, terminal.id ], `执行 ${order.id}`)
 
                         return A.proc.OK_STOP_CURRENT
                     }
@@ -748,7 +808,7 @@ class MarketModule {
                     const sellAmount = this.#repo[roomName].resourceStatus.getDescription()["sell"][resourceType]
                     if ( sellAmount <= 0 ) continue
                     const order = _.max(Game.market.getAllOrders({type: ORDER_BUY, resourceType: resourceType as ResourceConstant}).filter(o => o.amount > 0), o => o.price)
-                    if ( !order || !this.tracker.isGoodSell(resourceType as ResourceConstant, order.price) ) continue
+                    if ( !order || !this.tracker.isGoodSell(resourceType as ResourceConstant, order.price, roomName, order.roomName) ) continue
                     const buyAmount = order.amount
                     const available = resourceType === RESOURCE_ENERGY ? Math.floor(A.res.query(terminal.id, RESOURCE_ENERGY) / (1 + (1. - Math.exp(-Game.map.getRoomLinearDistance(roomName, order.roomName, true) / 30.)))) : A.res.query(terminal.id, resourceType as ResourceConstant)
                     const maxSupportedAmount = Math.floor((A.res.query(terminal.id, RESOURCE_ENERGY) - (resourceType === RESOURCE_ENERGY ? Math.min(sellAmount, buyAmount, available) : 0)) / (1. - Math.exp(-Game.map.getRoomLinearDistance(roomName, order.roomName, true) / 30.)))
@@ -761,28 +821,28 @@ class MarketModule {
                     assertWithMsg( energyCost + (resourceType === RESOURCE_ENERGY ? executionAmount : 0) <= A.res.query(terminal.id, RESOURCE_ENERGY), `执行订单 ${order.id} (${executionAmount}) 需要 ${energyCost + (resourceType === RESOURCE_ENERGY ? executionAmount : 0)} energy 但是只有 ${A.res.query(terminal.id, RESOURCE_ENERGY)}` )
 
                     assertWithMsg( A.res.request({ id: terminal.id, resourceType: RESOURCE_ENERGY, amount: energyCost }) === A.proc.OK, getFileNameAndLineNumber() )
-                    assertWithMsg( A.res.request({ id: terminal.id, resourceType: resourceType as ResourceConstant, amount: executionAmount }) === A.proc.OK, getFileNameAndLineNumber() )
+                    // 不重复 request, 挂单时已经 request 过
+                    // assertWithMsg( A.res.request({ id: terminal.id, resourceType: resourceType as ResourceConstant, amount: executionAmount }) === A.proc.OK, getFileNameAndLineNumber() )
 
                     assertWithMsg( Game.market.deal(order.id, executionAmount, roomName) === OK, getFileNameAndLineNumber() )
 
                     lastExecutionTick = Game.time
 
-                    A.timer.add(Game.time + 1, (orderId, resourceType, oldAmount, executionAmount, energyCost, idTerminal, idStorage) => {
-                        if ( !Game.getObjectById(idTerminal) || !Game.getObjectById(idStorage) ) return
+                    A.timer.add(Game.time + 1, (orderId, resourceType, oldAmount, executionAmount, energyCost, idTerminal) => {
+                        if ( !Game.getObjectById(idTerminal) ) return
                         const terminal = Game.getObjectById(idTerminal) as StructureTerminal
-                        const storage = Game.getObjectById(idStorage) as StructureStorage
                         // 首先判定订单是否真的被执行成功
                         const succeed = _.filter(Game.market.outgoingTransactions, tt => !!tt.order && tt.order.id === orderId).length > 0
                         if ( !succeed ) {
                             // 归还资源
                             assertWithMsg( A.res.signal(terminal.id, RESOURCE_ENERGY, energyCost ) === A.proc.OK, getFileNameAndLineNumber() )
-                            assertWithMsg( A.res.signal(terminal.id, resourceType, executionAmount ) === A.proc.OK, getFileNameAndLineNumber() )
+                            // assertWithMsg( A.res.signal(terminal.id, resourceType, executionAmount ) === A.proc.OK, getFileNameAndLineNumber() )
                             return
                         }
                         // 此时成功完成
                         this.#repo[roomName].resourceStatus.getDescription()["sell"][resourceType] -= executionAmount
                         assertWithMsg( A.res.signal(terminal.id, A.res.CAPACITY, energyCost + executionAmount) === A.proc.OK, getFileNameAndLineNumber() )
-                    }, [ order.id, resourceType, terminal.store.getUsedCapacity(resourceType as ResourceConstant), executionAmount, energyCost, terminal.id, storage.id ], `执行 ${order.id}`)
+                    }, [ order.id, resourceType, terminal.store.getUsedCapacity(resourceType as ResourceConstant), executionAmount, energyCost, terminal.id ], `执行 ${order.id}`)
 
                     return A.proc.OK_STOP_CURRENT
                 }
@@ -794,18 +854,16 @@ class MarketModule {
         // 更新 买卖 清单
         A.proc.createProc([
             () => A.proc.signal.Swait({ signalId: this.#repo[roomName].readySignal, lowerbound: 1, request: 0 }), 
-            () => P.exist(roomName, 'centralTransfer', 'storage'),
             () => P.exist(roomName, 'centralTransfer', 'terminal'), 
             () => {
                 const terminal = Game.rooms[roomName].terminal
-                const storage = Game.rooms[roomName].storage
-                if ( !terminal || !storage ) return [ A.proc.STOP_ERR, `无法在 ${roomName} 找到 Storage 或 Terminal` ] as [ typeof A.proc.STOP_ERR, string ]
+                if ( !terminal ) return [ A.proc.STOP_ERR, `无法在 ${roomName} 找到 Storage 或 Terminal` ] as [ typeof A.proc.STOP_ERR, string ]
 
                 // 检查卖出
                 for ( let resourceType of getTerminalSellList() ) {
                     if ( (resourceType as any) === 'mineral' ) resourceType = mineralType
-                    if ( A.res.query(terminal.id, resourceType) >= getTerminalMaxMaintainAmount(resourceType) && A.res.query(terminal.id, resourceType) > 0 ) {
-                        const amount = getTerminalMaxMaintainAmount(resourceType) - getTerminalMinMaintainAmount(resourceType)
+                    if ( A.res.query(terminal.id, resourceType) > 0 ) {
+                        const amount = A.res.query(terminal.id, resourceType)
                         assertWithMsg( A.res.request({ id: terminal.id, resourceType, amount }) === A.proc.OK, getFileNameAndLineNumber() )
                         this.#repo[roomName].resourceStatus.getDescription()["sell"][resourceType] = (this.#repo[roomName].resourceStatus.getDescription()["sell"][resourceType] || 0) + amount
                     }
@@ -815,11 +873,10 @@ class MarketModule {
                 for ( let resourceType in getTerminalBuyInfo() ) {
                     // 不在本房间买同样的资源
                     if ( resourceType === mineralType ) continue
-                    if ( this.#getEffectiveStorageResourceAmount(roomName, resourceType as ResourceConstant) < getTerminalBuyInfo()[resourceType as ResourceConstant].min && A.res.query(storage.id, A.res.CAPACITY) > getTerminalMaintainAmount("free before store") ) {
-                        const amount = Math.min(getTerminalBuyInfo()[resourceType as ResourceConstant].max - this.#getEffectiveStorageResourceAmount(roomName, resourceType as ResourceConstant), A.res.query(storage.id, A.res.CAPACITY) - getTerminalMaintainAmount("free before store"), A.res.query(terminal.id, A.res.CAPACITY))
+                    if ( this.#getEffectiveTerminalResourceAmount(roomName, resourceType as ResourceConstant) < getTerminalBuyInfo()[resourceType as ResourceConstant].min && A.res.query(terminal.id, A.res.CAPACITY) > getTerminalMaintainAmount("free before store") ) {
+                        const amount = Math.min(getTerminalBuyInfo()[resourceType as ResourceConstant].max - this.#getEffectiveTerminalResourceAmount(roomName, resourceType as ResourceConstant), A.res.query(terminal.id, A.res.CAPACITY) - getTerminalMaintainAmount("free before store"))
                         if ( amount <= 0 ) continue
                         assertWithMsg( A.res.request({ id: terminal.id, resourceType: A.res.CAPACITY, amount }) === A.proc.OK, getFileNameAndLineNumber() )
-                        assertWithMsg( A.res.request({ id: storage.id, resourceType: A.res.CAPACITY, amount }) === A.proc.OK, getFileNameAndLineNumber() )
                         this.#repo[roomName].resourceStatus.getDescription()["buy"][resourceType] = (this.#repo[roomName].resourceStatus.getDescription()["buy"][resourceType] || 0) + amount
                     }
                 }

@@ -341,7 +341,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos) {
 
         /** 移动到工作位置 */
         if ( creep.pos.roomName !== workerPos.roomName || creep.pos.getRangeTo(workerPos.x, workerPos.y) > 0 ) {
-            creep.travelTo(new RoomPosition(workerPos.x, workerPos.y, workerPos.roomName))
+            creep.moveTo(new RoomPosition(workerPos.x, workerPos.y, workerPos.roomName))
             return A.proc.OK_STOP_CURRENT
         }
 
@@ -384,7 +384,7 @@ function issueQuickEnergyFillProc(roomName: string, leftTopPos: Pos) {
         }
         /** 移动到工作位置 */
         if ( creep.pos.roomName !== workerPos.roomName || creep.pos.getRangeTo(workerPos.x, workerPos.y) > 0 ) {
-            creep.travelTo(new RoomPosition(workerPos.x, workerPos.y, workerPos.roomName))
+            creep.moveTo(new RoomPosition(workerPos.x, workerPos.y, workerPos.roomName))
             return A.proc.OK_STOP_CURRENT
         }
 

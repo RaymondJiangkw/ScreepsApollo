@@ -45,12 +45,12 @@ export function issueBuildStructureProc(roomName: string, structureType: Structu
                     return A.proc.STOP_SLEEP
                 } else {
                     const retCode = Game.rooms[roomName].createConstructionSite(getPos(), structureType)
-                    if ( retCode === ERR_NOT_IN_RANGE ) creep.travelTo(getPos())
+                    if ( retCode === ERR_NOT_IN_RANGE ) creep.moveTo(getPos())
                     else assertWithMsg( retCode === OK, `无法为 Controller 在 ${getPos()} 构建建筑 ${structureType}` )
                     return A.proc.OK_STOP_CURRENT
                 }
             }
-        } else creep.travelTo(getPos(), { range: 3 })
+        } else creep.moveTo(getPos())
 
         return A.proc.OK_STOP_CURRENT
     }
@@ -132,7 +132,7 @@ export function issueBuildProc(roomName: string) {
                 constructionSite = null
                 return [ A.proc.OK_STOP_CUSTOM, 'getConstructionSite' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
             }
-        } else creep.travelTo(constructionSite.pos, { range: 3 })
+        } else creep.moveTo(constructionSite.pos)
 
         return A.proc.OK_STOP_CURRENT
     }

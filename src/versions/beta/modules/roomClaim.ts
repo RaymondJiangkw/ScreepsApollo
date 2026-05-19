@@ -165,7 +165,7 @@ function issueClaimRoomProc(srcRoomName: string, tarRoomName: string, getIssuedF
         if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) return A.proc.OK
 
         if ( creep.pos.getRangeTo(controller) > 3 ) {
-            creep.travelTo(controller, { range: 3 })
+            creep.moveTo(controller)
             return A.proc.OK_STOP_CURRENT
         }
 
@@ -222,7 +222,7 @@ function issueClaimRoomProc(srcRoomName: string, tarRoomName: string, getIssuedF
         if ( creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0 ) return A.proc.OK
 
         if ( creep.pos.getRangeTo(constructionSite.pos) > 3 ) {
-            creep.travelTo(constructionSite, { range: 3 })
+            creep.moveTo(constructionSite)
             return A.proc.OK_STOP_CURRENT
         }
 

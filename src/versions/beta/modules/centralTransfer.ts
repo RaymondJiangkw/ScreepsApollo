@@ -7,7 +7,7 @@ import { creepModule as C } from "@/modules/creep"
 import { planModule as P } from "@/modules/plan"
 import { getTransferUnit, transferModule as T } from "@/modules/transfer"
 import { assertWithMsg, convertPosToString, getFileNameAndLineNumber, insertSortedBy, log, LOG_DEBUG } from "@/utils"
-import { getStorageMaintainAmount, getStorageMaxMaintainAmount, getStorageMinMaintainAmount } from "../config.production"
+import { getStorageMaintainAmount, getStorageMaintainFromTerminalList, getStorageMaxMaintainAmount, getStorageMinMaintainAmount } from "../config.production"
 
 const unitName = 'centralTransfer'
 const tagName = 'transferStructures'
@@ -219,7 +219,7 @@ function issueCentralTransferProc(roomName: string, leftTopPos: Pos ) {
                 return [A.proc.STOP_ERR, `Creep [${workerName}] 无法找到`] as [ typeof A.proc.STOP_ERR, string ]
             }
             if ( creep.pos.roomName !== posWork.roomName || creep.pos.x !== posWork.x || creep.pos.y !== posWork.y ) {
-                creep.travelTo( posWork )
+                creep.moveTo( posWork )
                 return A.proc.OK_STOP_CURRENT
             }
             if ( creep.store.getUsedCapacity() === 0 ) return A.proc.OK
@@ -462,6 +462,62 @@ function issueMineralStoreProc(roomName: string, leftTopPos: Pos, mineralType: M
     }, [ pid ])
 }
 
+function issueTerminalStoreProc(roomName: string) {
+    if ( !Game.rooms[roomName] ) return
+    const mineralType = Game.rooms[roomName].find(FIND_MINERALS)[0].mineralType
+    let oneTimeTransferSignal = A.proc.signal.createSignal(1)
+    const pid = A.proc.createProc([
+        () => P.exist(roomName, 'centralTransfer', 'storage'),
+        () => P.exist(roomName, 'centralTransfer', 'terminal'), 
+        ['wait', () => A.proc.signal.Swait({ signalId: oneTimeTransferSignal, lowerbound: 1, request: 0 })], 
+        () => {
+            const TRANSFER_UNIT = getTransferUnit(Game.rooms[roomName].controller.level)
+            const terminal = Game.rooms[roomName].terminal
+            const storage = Game.rooms[roomName].storage
+            if ( !terminal || !storage ) return [ A.proc.STOP_ERR, `无法在 ${roomName} 找到 Storage 或 Terminal` ] as [ typeof A.proc.STOP_ERR, string ]
+
+            if ( A.res.query(storage.id, A.res.CAPACITY) <= getStorageMaintainAmount("free before store") ) return A.proc.STOP_SLEEP
+
+            let isFinish = true
+            for ( const resourceType of getStorageMaintainFromTerminalList() ) {
+                if ( resourceType === mineralType ) continue
+                if ( A.res.query(storage.id, resourceType) >= getStorageMaxMaintainAmount(resourceType) ) continue
+
+                isFinish = false
+
+                const amount = A.res.query(terminal.id, resourceType)
+                // 因为可能有多种资源, 所以无法仅根据一个 stuck
+                if ( amount < TRANSFER_UNIT ) continue
+
+                const capacity = Math.min(getStorageMaxMaintainAmount(resourceType) - A.res.query(storage.id, resourceType), A.res.query(storage.id, A.res.CAPACITY) - getStorageMaintainAmount("free before store"), amount)
+
+                if ( capacity <= 0 ) continue
+
+                assertWithMsg( A.proc.signal.Swait({signalId: oneTimeTransferSignal, lowerbound: 1, request: 1}) === A.proc.OK, getFileNameAndLineNumber() )
+                assertWithMsg( A.res.request({ id: terminal.id, resourceType: resourceType, amount: capacity }) === A.proc.OK, getFileNameAndLineNumber() )
+                assertWithMsg( A.res.request({ id: storage.id, resourceType: A.res.CAPACITY, amount: capacity }) === A.proc.OK, getFileNameAndLineNumber() )
+
+                T.transfer(terminal.id, storage.id, resourceType, capacity, { allowLooseGrouping: true, callback: () => A.proc.signal.Ssignal({ signalId: oneTimeTransferSignal, request: 1 }) })
+
+                return [ A.proc.OK_STOP_CUSTOM, "wait" ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
+            }
+
+            if ( isFinish ) return A.proc.STOP_SLEEP
+            return A.proc.OK_STOP_CURRENT
+        }
+    ], `${roomName} => Store From Terminal`, true)
+    A.proc.trigger("watch", () => {
+        if ( !Game.rooms[roomName] || !Game.rooms[roomName].storage || !Game.rooms[roomName].terminal || A.res.query(Game.rooms[roomName].storage.id, A.res.CAPACITY) <= getStorageMaintainAmount("free before store") ) return false
+        let anyResourceNeedFill = false
+        for ( const resourceType of getStorageMaintainFromTerminalList() ) {
+            if ( resourceType === mineralType ) continue
+            anyResourceNeedFill = anyResourceNeedFill || A.res.query(Game.rooms[roomName].storage.id, resourceType) < getStorageMinMaintainAmount(resourceType)
+            if ( anyResourceNeedFill ) break
+        }
+        return anyResourceNeedFill
+    }, [ pid ])
+}
+
 export function issueCentralTransfer(roomName: string) {
     const mineralType = Game.rooms[roomName].find(FIND_MINERALS)[0].mineralType
     const planInfo = P.plan(roomName, 'unit', unitName)
@@ -469,5 +525,6 @@ export function issueCentralTransfer(roomName: string) {
     const leftTopPos = planInfo.leftTops[0]
     issueEnergyStoreProc(roomName, leftTopPos)
     issueMineralStoreProc(roomName, leftTopPos, mineralType)
+    issueTerminalStoreProc(roomName)
     return issueCentralTransferProc(roomName, leftTopPos)
 }

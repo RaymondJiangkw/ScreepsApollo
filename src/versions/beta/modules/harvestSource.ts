@@ -280,7 +280,7 @@ function issueHarvestSourceProc(roomName: string, sourceId: Id<Source>, sourcePo
     }
 
     const pid = A.proc.createProc([
-        ['start', () => C.acquire( 'harvester', roomName, name => harvesterName = name, sourcePos )], 
+        ['start', () => C.acquire( 'harvester', roomName, name => harvesterName = name, new RoomPosition(info()[STRUCTURE_CONTAINER].pos.x, info()[STRUCTURE_CONTAINER].pos.y, roomName) )], 
         ['gotoSource', () => gotoSource( harvesterName )], 
         () => buildRepairOrTransfer( harvesterName ), 
         ['JUMP', () => true, 'gotoSource'], 

@@ -51,7 +51,7 @@ function issueRoomTowerDefend(roomName: string) {
             if ( towers.length === 0 ) return [A.proc.STOP_ERR, `${roomName} 房间无可用 Tower`] as [ typeof A.proc.STOP_ERR, string ]
 
             const hostileCreeps = Game.rooms[roomName].find(FIND_HOSTILE_CREEPS)
-            if ( hostileCreeps.length > 0 && !Game.rooms[roomName].controller.safeMode ) {
+            if ( hostileCreeps.length > 0 ) {
                 const hostileCreepsDesc = hostileCreeps.map(creep => {
                     return {creep, hasHeal: _.filter(creep.body, desc => desc.type === HEAL && desc.hits > 0).length > 0, hasAttack: _.filter(creep.body, desc => (desc.type === ATTACK || desc.type === RANGED_ATTACK) && desc.hits > 0).length > 0, range: towers.length > 0 ? towers[0].pos.getRangeTo(creep) : 0 }
                 })

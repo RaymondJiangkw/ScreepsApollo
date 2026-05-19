@@ -210,3 +210,11 @@ export function calcTowerAttackHits(range: number) {
 export function floorTo5X(n: number) {
     return Math.floor(n / 5) * 5
 }
+
+export function countBodyParts(creep: Creep, bodyType: BodyPartConstant) {
+    return _.filter(creep.body, b => b.type === bodyType).length
+}
+
+export function countBoostableBodyParts(creep: Creep, bodyType: BodyPartConstant) {
+    return _.filter(creep.body, b => b.type === bodyType && !b.boost).length
+}

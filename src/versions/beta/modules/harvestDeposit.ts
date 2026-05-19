@@ -17,7 +17,8 @@ export function registerHarvestDeposit() {
     C.design('deposit_harvestor', {
         amount: 2, 
         body: {
-            4: [ MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, WORK, WORK, WORK, WORK ]
+            4: [ MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, WORK, WORK, WORK, WORK ], 
+            6: [ MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, CARRY, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK ]
         }, 
         strict: true, 
         priority: C.PRIORITY_CASUAL
@@ -60,7 +61,7 @@ function issueHarvestDepositProc(srcRoomName: string, tarPos: Pos, flagName: str
                 return [ A.proc.OK_STOP_CUSTOM, 'end' ] as [ typeof A.proc.OK_STOP_CUSTOM, string ]
             }
 
-            (creep.memory as any).startTime = Game.time
+            if ( !(creep.memory as any).startTime ) (creep.memory as any).startTime = Game.time
             return A.proc.OK
         }, 
         ['gotoRoom', () => {
@@ -81,7 +82,7 @@ function issueHarvestDepositProc(srcRoomName: string, tarPos: Pos, flagName: str
             }
 
             if ( creep.pos.roomName !== tarPos.roomName ) {
-                creep.travelTo(new RoomPosition(tarPos.x, tarPos.y, tarPos.roomName))
+                creep.moveTo(new RoomPosition(tarPos.x, tarPos.y, tarPos.roomName))
                 return A.proc.OK_STOP_CURRENT
             }
 
@@ -201,7 +202,7 @@ function issueHarvestDepositProc(srcRoomName: string, tarPos: Pos, flagName: str
             }
 
             if ( creep.pos.roomName !== srcRoomName || creep.pos.getRangeTo(storage) > 1 ) {
-                creep.travelTo(storage)
+                creep.moveTo(storage)
                 return A.proc.OK_STOP_CURRENT
             }
 

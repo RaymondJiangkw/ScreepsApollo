@@ -121,8 +121,11 @@ export function issueFillProc(roomName: string) {
 
     const harvestAndFillPid = A.proc.createProc([
         () => {
-            if ( !!Game.rooms[roomName] && Game.rooms[roomName].energyAvailable < Game.rooms[roomName].energyCapacityAvailable && Game.rooms[roomName].controller.level < 6 ) return A.proc.OK
-            else return A.proc.STOP_SLEEP
+            if ( !!Game.rooms[roomName] && Game.rooms[roomName].energyAvailable < Game.rooms[roomName].energyCapacityAvailable && Game.rooms[roomName].controller.level < 6 ) {
+                const spawns = Game.rooms[roomName].find<FIND_STRUCTURES, StructureSpawn | StructureExtension | StructureTower>(FIND_STRUCTURES, { filter: s => (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_EXTENSION) && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && !isBelongingToQuickEnergyFilling(s.pos) })
+                if ( spawns.length > 0 ) return A.proc.OK
+                else return A.proc.STOP_SLEEP
+            } else return A.proc.STOP_SLEEP
         }, 
         () => C.acquire('worker', roomName, name => workerName = name), 
         [ 'gotoSource', gotoSource ], 
@@ -134,8 +137,11 @@ export function issueFillProc(roomName: string) {
 
     const withdrawAndFillPid = A.proc.createProc([
         () => {
-            if ( !!Game.rooms[roomName] && Game.rooms[roomName].energyAvailable < Game.rooms[roomName].energyCapacityAvailable && Game.rooms[roomName].controller.level >= 6 ) return A.proc.OK
-            else return A.proc.STOP_SLEEP
+            if ( !!Game.rooms[roomName] && Game.rooms[roomName].energyAvailable < Game.rooms[roomName].energyCapacityAvailable && Game.rooms[roomName].controller.level >= 6 ) {
+                const spawns = Game.rooms[roomName].find<FIND_STRUCTURES, StructureSpawn | StructureExtension | StructureTower>(FIND_STRUCTURES, { filter: s => (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_EXTENSION) && s.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && !isBelongingToQuickEnergyFilling(s.pos) })
+                if ( spawns.length > 0 ) return A.proc.OK
+                else return A.proc.STOP_SLEEP
+            } else return A.proc.STOP_SLEEP
         }, 
         () => C.acquire('transferer', roomName, name => transfererName = name), 
         [ 'withdrawSource', withdrawSource ], 

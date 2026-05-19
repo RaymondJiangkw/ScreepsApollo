@@ -6,7 +6,8 @@ import { Apollo as A } from "@/framework/apollo"
 import { planModule as P } from "@/modules/plan"
 import { creepModule as C } from "@/modules/creep"
 import { transferModule as T } from "@/modules/transfer"
-import { assertWithMsg, calcBodyEffectiveness, getAvailableSurroundingPos, getFileNameAndLineNumber, log, LOG_ERR } from "@/utils"
+import { labModule as L } from "./labManage"
+import { assertWithMsg, calcBodyEffectiveness, countBoostableBodyParts, getAvailableSurroundingPos, getFileNameAndLineNumber, log, LOG_ERR } from "@/utils"
 import { issueBuildStructureProc } from "./buildStructure"
 import { getEnergy } from "./shared"
 
@@ -74,7 +75,7 @@ function issueUpgradeProc(roomName: string) {
         /** 已经接近 Controller */
         if ( creep.pos.roomName === roomName && creep.pos.getRangeTo(controller) <= 3 ) return A.proc.OK
 
-        creep.travelTo(controller, { range: 3 })
+        creep.moveTo(controller)
         return A.proc.OK_STOP_CURRENT
     }
 
@@ -104,9 +105,12 @@ function issueUpgradeProc(roomName: string) {
     }
 
     const gotoSource = getEnergy(roomName, () => workerName, name => workerName = name)
+    const [handler, reserveLab] = L.reserve(roomName, { resourceType: RESOURCE_CATALYZED_GHODIUM_ACID, getBodyPartsCount: () => !! Game.creeps[workerName] && Game.rooms[roomName].controller.level < 8 ? countBoostableBodyParts(Game.creeps[workerName], WORK) : 0 }, false)
 
     return A.proc.createProc([
         () => C.acquire('weak_upgrader', roomName, name => workerName = name), 
+        ...reserveLab, 
+        () => L.boost(handler, () => workerName, name => workerName = name), 
         [ 'gotoSource', gotoSource ], 
         () => gotoController(workerName), 
         () => upgradeController(workerName), 
@@ -118,11 +122,13 @@ export function registerFastUpgrade() {
     C.design('weak_upgrader', {
         body: {
             1: [ CARRY, WORK, MOVE ], 
-            2: [ CARRY, CARRY, WORK, WORK, MOVE, MOVE, MOVE, MOVE ], 
-            3: [ CARRY, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE ], 
-            4: [ CARRY, CARRY, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE ], 
-            5: [ CARRY, CARRY, CARRY, CARRY, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE ], 
-            6: [ CARRY, CARRY, CARRY, CARRY, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE ], 
+            2: [ CARRY, WORK, MOVE, MOVE ], 
+            3: [ CARRY, CARRY, WORK, WORK, MOVE, MOVE, MOVE, MOVE ], 
+            4: [ CARRY, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE ], 
+            5: [ CARRY, CARRY, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE ], 
+            6: [ CARRY, CARRY, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE ], 
+            // 6: [ CARRY, CARRY, CARRY, CARRY, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE ], 
+            7: [ CARRY, CARRY, CARRY, CARRY, WORK, WORK, WORK, WORK, WORK, WORK, WORK, WORK, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE, MOVE ], 
             8: [ CARRY, WORK, MOVE ]
         }, 
         amount: 1

@@ -10,7 +10,7 @@ import { assertWithMsg, generate_random_hex, largest_less_than, log, LOG_DEBUG }
  */
 interface CreepModuleContext {
     /** 发布在成功 Spawn Creep 之后注册的事件 (对外暴露的用处在于 重新 mount 时, 需要对正在 Spawning 的 Creeps 延迟注册) */
-    issueRegisterAfterSpawn(creepName: string, callback: (name: string) => void): void
+    issueRegisterAfterSpawn(creepName: string, workPos: RoomPosition, callback: (name: string, workPos: RoomPosition) => void): void
     /**
      * 申请生产新的 Creep.
      * 注意: 这个 API 保证成功, 即错误处理应当在 spawn 模块内部.
@@ -31,7 +31,7 @@ interface CreepModuleContext {
      * @param workPos Creep 预计的工作地点. 可以根据该信息优化生产 Creep 所选用的 Spawn.
      * @param strict 是否严格要求满足指定 Body
      */
-    spawnCreep(roomName: string, callback: (name: string) => void, body: BodyPartConstant[], priority: number, memory?: CreepMemory, workPos?: RoomPosition, strict? : boolean): void
+    spawnCreep(roomName: string, callback: (name: string, workPos?: RoomPosition) => void, body: BodyPartConstant[], priority: number, memory?: {}, workPos?: RoomPosition, strict? : boolean): void
 }
 
 const PRIORITY_CRITICAL = 0
@@ -198,6 +198,12 @@ class CreepModule {
         return OK
     }
 
+    /** 计算对应型号的 Creep 的 Body 数量 */
+    countBodyParts(type: string, controllerLevel: number, bodyType: BodyPartConstant) {
+        const prototype = this.#types[type][controllerLevel]
+        return _.filter(prototype.body, b => b === bodyType).length
+    }
+
     /**
      * 申请生产特定型号新的 Creep
      * 注意: 本函数不进行数量控制
@@ -210,12 +216,12 @@ class CreepModule {
         
         return spawnCreep(roomName, 
             /** @CrossRef Relevant function in the constructor */
-            (name: string) => {
+            (name: string, workPos?: RoomPosition) => {
                 const repo = this.#getRepo(type, roomName)
                 repo.spawning -= 1
-                this.#register(name)
+                this.#register(name, workPos)
             }, 
-            prototype.body, prototype.priority, { spawnType: type, spawnRoomName: roomName }, workPos, prototype.strict
+            prototype.body, prototype.priority, { spawnType: type, spawnRoomName: roomName, workPos: workPos }, workPos, prototype.strict
         )
     }
 
@@ -241,6 +247,12 @@ class CreepModule {
         }
     }
 
+    /** Creep 接班, 立即再生产下一个同类型 Creep, 会自动移动到 workPos 如果指定并且未被其他任务占用 */
+    replace(type: string, roomName: string, workPos?: RoomPosition) {
+        if ( !Game.rooms[roomName] || !Game.rooms[roomName].controller ) return
+        this.#issue(type, roomName, workPos)
+    }
+
     /** 补充特定型号的 Creep 数量 (不检查是否有 Creep 应当消亡) */
     #replenish(type: string, roomName: string, workPos?: RoomPosition) {
         if ( !Game.rooms[roomName] || !Game.rooms[roomName].controller ) return
@@ -259,7 +271,7 @@ class CreepModule {
      * 
      * @param roomName 申请的房间名称 (必须在控制内)
      */
-    #register(name: string) {
+    #register(name: string, workPos?: RoomPosition) {
         assertWithMsg(name in Game.creeps, `无法找到 Creep '${name}' 以注册`)
         const creep = Game.creeps[name]
 
@@ -275,9 +287,11 @@ class CreepModule {
             const creep = Game.creeps[creepName]
             if ( !creep ) return A.timer.STOP
             if ( _.includes(repo.busy, creep.name) ) return A.timer.STOP
-            if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length === 0 ) return A.timer.STOP
-            creep.travelTo(creep.pos, { flee: true, ignoreCreeps: false, offRoad: true, avoidStructureTypes: [ STRUCTURE_CONTAINER, STRUCTURE_ROAD ] })
-        }, [ creep.name ], `闲置 ${creep}`, 1)
+            if ( !workPos ) {
+                if ( creep.pos.lookFor(LOOK_STRUCTURES).filter(s => s.structureType === STRUCTURE_CONTAINER || s.structureType === STRUCTURE_ROAD).length === 0 ) return A.timer.STOP
+                creep.travelTo(creep.pos, { flee: true, ignoreCreeps: false, offRoad: true, avoidStructureTypes: [ STRUCTURE_CONTAINER, STRUCTURE_ROAD ] })
+            } else if ( creep.pos.roomName !== workPos.roomName || creep.pos.getRangeTo(workPos) > 1 ) creep.moveTo(new RoomPosition(workPos.x, workPos.y, workPos.roomName))
+        }, [ creep.name ], `闲置 ${creep} 或 移动其到工作位置`, 1)
     }
 
     /**
@@ -345,18 +359,19 @@ class CreepModule {
         // 注册已有的 Creep
         for (const name in Game.creeps)
             if ( !Game.creeps[name].spawning )
-                this.#register(name)
+                this.#register(name, Game.creeps[name].memory.workPos)
             else {
                 const { issueRegisterAfterSpawn } = this.#context
                 const creep = Game.creeps[name]
                 const type = creep.memory.spawnType
                 const roomName = creep.memory.spawnRoomName
+                const workPos = creep.memory.workPos
                 this.#getRepo(type, roomName).spawning += 1
                 /** @CrossRef Relevant function in this.#issue */
-                issueRegisterAfterSpawn( name, (name: string) => {
+                issueRegisterAfterSpawn( name, workPos, (name: string, workPos: RoomPosition) => {
                     const repo = this.#getRepo(type, roomName)
                     repo.spawning -= 1
-                    this.#register(name)
+                    this.#register(name, workPos)
                 } )
             }
         
@@ -426,7 +441,7 @@ type RequestCreepType = {
     cost: number, 
     body: BodyPartConstant[], 
     requestTick: number, 
-    memory?: CreepMemory, 
+    memory?: {}, 
     workPos?: RoomPosition, 
     strict: boolean, 
     requestId: string, 
@@ -436,16 +451,16 @@ class CreepSpawnModule {
     #repo: { [roomName: string]: { [priority: number]: RequestCreepType[] } } = {}
     #issuedRoomNames: string[] = []
 
-    issueRegisterAfterSpawn(creepName: string, callback: (name: string) => void): void {
-        A.timer.add(Game.time + 1, (name, callback) => {
+    issueRegisterAfterSpawn(creepName: string, workPos: RoomPosition, callback: (name: string, workPos?: RoomPosition) => void): void {
+        A.timer.add(Game.time + 1, (name, workPos, callback) => {
             if ( name in Game.creeps && !Game.creeps[name].spawning ) {
-                callback(name)
+                callback(name, workPos)
                 return A.timer.STOP
             }
-        }, [ creepName, callback ], `对于 Creep [${creepName}] 的出生注册`, CREEP_SPAWN_TIME)
+        }, [ creepName, workPos, callback ], `对于 Creep [${creepName}] 的出生注册`, CREEP_SPAWN_TIME)
     }
 
-    request(roomName: string, callback: (name: string) => void, body: BodyPartConstant[], priority: number, memory?: CreepMemory, workPos?: RoomPosition, strict: boolean = false): void {
+    request(roomName: string, callback: (name: string, workPos?: RoomPosition) => void, body: BodyPartConstant[], priority: number, memory?: {}, workPos?: RoomPosition, strict: boolean = false): void {
         if ( !(roomName in this.#repo) ) this.#repo[roomName] = {}
         if ( !(priority in this.#repo[roomName]) ) this.#repo[roomName][priority] = []
         this.#repo[roomName][priority].push({ callback, cost: calculateBodyCost(body), body, requestTick: Game.time, memory, workPos, requestId: generate_random_hex(32), strict })
@@ -505,11 +520,11 @@ class CreepSpawnModule {
                         while ( !name || name in Game.creeps )
                             name = `${roomName}-${generate_random_hex(4)}`
                         const spawnReturn = spawn.spawnCreep(bodies, name, {
-                            memory: order.memory, 
+                            memory: { ...order.memory, spawnTime: Game.time + 1 + bodies.length * CREEP_SPAWN_TIME } as CreepMemory, 
                             directions: (order.workPos && spawn.pos.getRangeTo(order.workPos) <= 1)? [ spawn.pos.getDirectionTo(order.workPos) ] : undefined
                         })
                         assertWithMsg(spawnReturn === OK, `生产 Creep [${bodies}; ${roomName}] 时, 选定的 Spawn [${spawn.id}] 无法成功生产 Creep (ERR Code: ${spawnReturn})`)
-                        this.issueRegisterAfterSpawn( name, order.callback )
+                        this.issueRegisterAfterSpawn( name, order.workPos, order.callback )
                         // 删除成功 Spawn 的订单
                         _.remove(this.#repo[roomName][priority] as RequestCreepType[], o => o.requestId === order.requestId)
                         flag = true
